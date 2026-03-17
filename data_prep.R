@@ -57,24 +57,40 @@ tourism <- tourism_bottom %>%
     df
   }
 
-# ── Reorder columns ───────────────────────────────────────────────────────────
+# ── Level 2b: State totals (across all purposes) ─────────────────────────────
+for (state in states) {
+  col_name <- state
+  pattern  <- paste0("^", state, "..", "(Hol|Vis|Bus|Oth)$")
+  tourism[[col_name]] <- sum_cols(tourism_bottom, pattern)
+}
+
+# ── Level 3b: Zone totals (across all purposes) ───────────────────────────────
+for (zone in zones) {
+  col_name <- zone
+  pattern  <- paste0("^", zone, ".", "(Hol|Vis|Bus|Oth)$")
+  tourism[[col_name]] <- sum_cols(tourism_bottom, pattern)
+}
+
+# ── Level 4b: Region totals (across all purposes) ────────────────────────────
+for (region in regions) {
+  col_name <- region
+  pattern  <- paste0("^", region, "(Hol|Vis|Bus|Oth)$")
+  tourism[[col_name]] <- sum_cols(tourism_bottom, pattern)
+}
+
 purposes <- c("Hol", "Vis", "Bus", "Oth")
 
-# Level 0 & 1
 lvl0 <- "Total"
 lvl1 <- paste0("Total", purposes)
 
-# Level 2: single-letter state codes × purpose
-states <- unique(str_extract(series_cols, "^[A-Z]"))
-lvl2   <- as.vector(outer(states, purposes, paste0))
-
-# Level 3: two-letter zone codes × purpose
-zones <- unique(str_extract(series_cols, "^[A-Z]{2}"))
-lvl3  <- as.vector(outer(zones, purposes, paste0))
-
-# Level 4: three-letter region codes × purpose (original bottom-level columns)
+states  <- unique(str_extract(series_cols, "^[A-Z]"))
+zones   <- unique(str_extract(series_cols, "^[A-Z]{2}"))
 regions <- unique(str_extract(series_cols, "^[A-Z]{3}"))
-lvl4    <- as.vector(outer(regions, purposes, paste0))
+
+# For each level, put the aggregate total first, then the four purpose splits
+lvl2 <- as.vector(sapply(states,  function(s) c(s, paste0(s, purposes))))
+lvl3 <- as.vector(sapply(zones,   function(z) c(z, paste0(z, purposes))))
+lvl4 <- as.vector(sapply(regions, function(r) c(r, paste0(r, purposes))))
 
 ordered_cols <- c("Year", "Month", lvl0, lvl1, lvl2, lvl3, lvl4)
 
