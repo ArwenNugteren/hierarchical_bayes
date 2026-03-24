@@ -14,9 +14,9 @@ brisbane_tourism <- qld_tourism %>%
   select(C)
 
 ## scale data
-Y_mean <- mean(brisbane_tourism$CAB)
-Y_sd   <- sd(brisbane_tourism$CAB)
-Y_scaled <- (brisbane_tourism$CAB - Y_mean) / Y_sd
+Y_mean <- mean(brisbane_tourism$C)
+Y_sd   <- sd(brisbane_tourism$C)
+Y_scaled <- (brisbane_tourism$C - Y_mean) / Y_sd
 
 training_start  <- 1                       
 training_end    <- 96
