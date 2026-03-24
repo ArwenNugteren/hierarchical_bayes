@@ -4,6 +4,8 @@ library(stringr)
 library(rstan)
 library(posterior)
 library(loo)
+library(bayesplot)
+library(ggplot2)
 
 load("tourism.Rdata")
 
@@ -32,14 +34,11 @@ parameters {
   real<lower=0,upper=1> gamma;
   real<lower=0>         sigma;
   real                  l_0;
-  vector[m]             s_raw;
+  vector[m]             s_0;
 }
 transformed parameters {
-  vector[m] s_0;
-  s_0 = s_raw - mean(s_raw); //enforcing sum to 0 constraint
-
-  vector[T_train + 1] l;
   vector[T_train + m] s;
+  vector[T_train + 1] l;
 
   for (j in 1:m) s[j] = s_0[j];
   l[1] = l_0;
@@ -51,12 +50,14 @@ transformed parameters {
   }
 }
 model {
-  alpha ~ unif(0, 1);
-  gamma ~ unif(0, 1);
+  alpha ~ uniform(0, 1);
+  gamma ~ uniform(0, 1);
   sigma ~ cauchy(0, 1);
   l_0   ~ normal(Y[1], 1);
-  s_raw ~ normal(0, 1);
-
+  
+  s_0 ~ normal(0, 1);
+  sum(s_0) ~ normal(0, 0.01 * m); // enforcing sum to 0 constraint for identifiability
+  
   for (i in 1:T_train)
     Y[i] ~ normal(l[i] + s[i], sigma);
 }
@@ -85,6 +86,11 @@ generated quantities {
   vector[T_train] log_lik;
   for (i in 1:T_train) {
     log_lik[i] = normal_lpdf(Y[i] | l[i] + s[i], sigma);
+  }
+  // do some posterior predictive checks
+  vector[T_train] Y_rep;
+  for (i in 1:T_train) {
+    Y_rep[i] = normal_rng(l[i] + s[i], sigma);
   }
 }
 "
@@ -126,6 +132,85 @@ pairs(stanFit,    pars = c("alpha", "gamma", "sigma"))
 traceplot(stanFit, pars = c("alpha", "gamma"))
 
 View(summary(stanFit)$summary)
+
+pairs(stanFit, pars = c("alpha", "gamma", "sigma", "l_0"))
+pairs(stanFit, pars = c("s_0[1]", "s_0[2]", "s_0[3]", "s_0[4]", "s_0[5]", "s_0[6]", 
+                           "s_0[7]", "s_0[8]", "s_0[9]", "s_0[10]", "s_0[11]", "s_0[12]"))
+
+# posterior predictive checks on in-sample training data
+Y_rep_draws <- rstan::extract(stanFit, pars = "Y_rep")$Y_rep
+# Y_rep_draws is [n_draws x T_train]
+Y_obs <- Y_scaled[1:training_end]
+
+# ── 1. Density overlay ────────────────────────────────────────────────────────
+# Simulated densities (grey) overlaid on observed density (dark)
+# Good for checking overall distributional shape
+ppc_dens_overlay(Y_obs, Y_rep_draws[1:200, ])
+
+# ── 2. Mean and interval bands over time ──────────────────────────────────────
+# Checks whether the model captures the time series dynamics
+ppc_ribbon(Y_obs, Y_rep_draws[1:200, ], x = 1:training_end)
+
+# ── 3. Test statistics ────────────────────────────────────────────────────────
+# Compare summary statistics of replicated vs observed data
+# Ideally the observed value (dark line) sits well within the simulated distribution
+ppc_stat(Y_obs, Y_rep_draws, stat = "mean")
+ppc_stat(Y_obs, Y_rep_draws, stat = "sd")
+ppc_stat(Y_obs, Y_rep_draws, stat = "max")
+ppc_stat(Y_obs, Y_rep_draws, stat = "min")
+
+# ── 4. Seasonal check ─────────────────────────────────────────────────────────
+# Group by month to check if seasonal structure is captured
+month_idx <- rep(1:12, length.out = training_end)
+ppc_stat_grouped(Y_obs, Y_rep_draws, group = month_idx, stat = "mean")
+
+
+# predictive checks over the forecast values
+# Extract forecast draws [n_draws x 13], take first 12 horizons
+Y_fc_draws <- rstan::extract(stanFit, pars = "Y_forecast")$Y_forecast[, 1:12]
+
+# Back-transform to original scale
+Y_fc_draws_orig <- Y_fc_draws * Y_sd + Y_mean
+
+# Actual out-of-sample values
+actuals <- aus_tourism$Total[(training_end + 1):(training_end + 12)]
+
+# Month labels — continuing from wherever training ended
+# training_end = 96 months from start, so forecast starts at month 97
+last_train_month <- ((training_end - 1) %% 12) + 1   # which calendar month is obs 96
+fc_months <- ((last_train_month:(last_train_month + 11)) %% 12) + 1
+
+# Build a long data frame of draws for plotting
+draws_df <- as.data.frame(Y_fc_draws_orig)
+colnames(draws_df) <- paste0("h", 1:12)
+draws_df$draw <- 1:nrow(draws_df)
+
+draws_long <- draws_df %>%
+  tidyr::pivot_longer(-draw, names_to = "horizon", values_to = "value") %>%
+  mutate(horizon = as.integer(sub("h", "", horizon)),
+         month   = fc_months[horizon])
+
+actuals_df <- data.frame(
+  horizon = 1:12,
+  month   = fc_months,
+  actual  = actuals
+)
+
+ggplot(draws_long, aes(x = value)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 40,
+                 fill = "steelblue", alpha = 0.4) +
+  geom_vline(data = actuals_df, aes(xintercept = actual),
+             colour = "navy", linewidth = 1) +
+  facet_wrap(~ horizon, scales = "free",
+             labeller = labeller(horizon = setNames(
+               paste0("h=", 1:12, "  (month ", fc_months, ")"),
+               1:12
+             ))) +
+  labs(x = NULL, y = NULL,
+       title = "Forecast posterior predictive vs actuals",
+       subtitle = "Dark line = observed value") +
+  theme_minimal()
+
 
 
 #### accuracy evaluation 

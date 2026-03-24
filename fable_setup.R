@@ -152,16 +152,22 @@ tourism <- tourism %>%
 ### aus total tourism
 
 aus_tourism <- tourism %>%
-  select(Total)
+  select(G)
 
-aus_tourism <- aus_tourism[1:96,]
+# Y_mean <- mean(aus_tourism$Total)
+# Y_sd   <- sd(aus_tourism$Total)
+Y_mean <- 0
+Y_sd <- 1
 
-# aus_model <- aus_tourism %>%
-#   model(ETS(Total ~ error("A") + season("A")))
-# report(aus_model)
+aus_tourism <- aus_tourism[1:96,] %>%
+  mutate(scaled_total = (G - Y_mean)/Y_sd)
+
 aus_model <- aus_tourism %>%
-  model(ETS(Total))
+  model(ETS(scaled_total ~ error("A") + season("A")))
 report(aus_model)
+# aus_model <- aus_tourism %>%
+#   model(ETS(scaled_total))
+# report(aus_model)
 
 # ── Forecast ──────────────────────────────────────────────────────────────────
 
@@ -171,7 +177,7 @@ fc <- aus_model %>%
 # ── Actuals ───────────────────────────────────────────────────────────────────
 
 actuals <- tourism %>%
-  select(Total) %>%
+  select(A) %>%
   slice(97:108)
 
 # ── Accuracy ─────────────────────────────────────────────────────────────────
@@ -180,6 +186,7 @@ accuracy_df <- fc %>%
   as_tibble() %>%
   select(Date, .mean) %>%
   rename(forecast = .mean) %>%
+  mutate(forecast = forecast*Y_sd + Y_mean) %>%
   bind_cols(actual = actuals$Total) %>%
   mutate(
     horizon   = 1:12,
