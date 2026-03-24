@@ -127,6 +127,21 @@ print(ic_df)
 cat("\nSummed across all series (comparable to Bayesian):\n")
 print(ic_summary)
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # ── Forecasts ─────────────────────────────────────────────────────────────────
 
 fc <- fit %>%
@@ -168,3 +183,5 @@ summary_accuracy <- accuracy_df %>%
 
 cat("\nPer-series MAE and RMSE:\n")
 print(summary_accuracy)
+
+
