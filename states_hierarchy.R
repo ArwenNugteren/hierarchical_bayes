@@ -1,6 +1,16 @@
+library(dplyr)
+library(stringr)
+library(rstan)
+library(scoringRules)
+
 # ── Data prep ─────────────────────────────────────────────────────────────────
 
 load("tourism.Rdata")
+
+# times
+training_end <- 96
+m            <- 12L
+horizon      <- 12
 
 # State series A-G (single letter codes)
 state_codes <- names(tourism)[grepl("^[A-G]$", names(tourism))]
@@ -19,6 +29,7 @@ regions_per_total <- sum(regions_per_state)
 Y_raw_state <- tourism %>% select(all_of(state_codes)) %>% as.matrix()
 Y_raw_total <- tourism %>% pull(Total)
 
+
 # Scale from bottom-level region data, consistent with earlier approach
 # Use the state-level training data to define scale
 Y_mean <- mean(Y_raw_state[1:training_end, ])
@@ -30,9 +41,7 @@ Y_state <- (Y_raw_state - Y_mean) / Y_sd
 # Total: scaled by n_states equivalent (sum of states)
 Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / (Y_sd * n_state)
 
-training_end <- 96
-m            <- 12L
-horizon      <- 12
+
 
 # ── Stan model ────────────────────────────────────────────────────────────────
 
@@ -50,8 +59,8 @@ parameters {
   // ── Hyperpriors on alpha and gamma ────────────────────────────────────────
   real<lower=0, upper=1> mu_alpha;
   real<lower=0, upper=1> mu_gamma;
-  real<lower=0> sigma_alpha;
-  real<lower=0> sigma_gamma;
+  //real<lower=0> sigma_alpha;
+  //real<lower=0> sigma_gamma;
 
   // ── State-level smoothing parameters ─────────────────────────────────────
   vector<lower=0, upper=1>[n_state] alpha_state;
@@ -104,27 +113,27 @@ transformed parameters {
 }
 model {
   // ── Hyperpriors ───────────────────────────────────────────────────────────
-  mu_alpha ~ uniform(0, 1);
-  mu_gamma ~ uniform(0, 1);
-  sigma_alpha ~ normal(0, 0.3);
-  sigma_gamma ~ normal(0, 0.3);
+  mu_alpha ~ uniform(0,1);
+  mu_gamma ~ uniform(0,1);
+  //sigma_alpha ~ normal(0, 0.3);
+  //sigma_gamma ~ normal(0, 0.3);
 
   // ── State-level priors drawn from hyperprior ──────────────────────────────
-  alpha_state ~ normal(mu_alpha, sigma_alpha);
-  gamma_state ~ normal(mu_gamma, sigma_gamma);
-  sigma_state ~ cauchy(0, 1);
+  alpha_state ~ normal(mu_alpha, 0.1);
+  gamma_state ~ normal(mu_gamma, 0.1);
+  sigma_state ~ cauchy(0, 0.3);
 
   // ── Total-level priors drawn from same hyperprior ─────────────────────────
-  alpha_total ~ normal(mu_alpha, sigma_alpha);
-  gamma_total ~ normal(mu_gamma, sigma_gamma);
-  sigma_total ~ cauchy(0, 1);
+  alpha_total ~ normal(mu_alpha, 0.1);
+  gamma_total ~ normal(mu_gamma, 0.1);
+  sigma_total ~ cauchy(0, 0.3);
 
   // ── Initial state priors ──────────────────────────────────────────────────
   l0_state ~ normal(0, 1);
   l0_total ~ normal(0, 1);
   for (n in 1:n_state) {
     s0_state[n] ~ normal(0, 1);
-    sum(s0_state[n]) ~ normal(0, 0.01 * m);
+    sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
   }
   s0_total ~ normal(0, 1);
   sum(s0_total) ~ normal(0, 0.01 * m);
@@ -166,15 +175,6 @@ generated quantities {
     }
     Y_fc_total[H] = normal_rng(lf[H] + sf[H], sigma_total);
   }
-
-  // ── Log likelihood ────────────────────────────────────────────────────────
-  matrix[T_train, n_state] log_lik_state;
-  vector[T_train]           log_lik_total;
-  for (n in 1:n_state)
-    for (i in 1:T_train)
-      log_lik_state[i, n] = normal_lpdf(Y_state[i, n] | l_s[n][i] + s_s[n][i], sigma_state[n]);
-  for (i in 1:T_train)
-    log_lik_total[i] = normal_lpdf(Y_total[i] | l_t[i] + s_t[i], sigma_total);
 }
 "
 
@@ -200,13 +200,20 @@ stanFit <- sampling(
   chains = 4,
   iter   = 2000,
   warmup = 1000,
-  cores  = 4
+  cores  = 4 
+  # control = list(adapt_delta = 0.95)
 )
 end_time <- Sys.time()
 print(end_time - start_time)
 
 cat("Max Rhat:  ", max(summary(stanFit)$summary[, "Rhat"],  na.rm = TRUE), "\n")
 cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
+
+summary_df <- summary(stanFit)$summary
+min_neff_idx <- which.min(summary_df[, "n_eff"])
+cat("Parameter:", rownames(summary_df)[min_neff_idx], "\n")
+cat("n_eff:", summary_df[min_neff_idx, "n_eff"], "\n")
+cat("Rhat:", summary_df[min_neff_idx, "Rhat"], "\n")
 
 View(summary(stanFit)$summary)
 
@@ -218,47 +225,24 @@ pairs(stanFit, pars = c("mu_alpha", "mu_gamma"))
 all_pars <- names(stanFit)
 
 # grab all alpha-related parameters
-alpha_pars <- all_pars[grepl("alpha", all_pars)]
-
+alpha_pars <- all_pars[grepl("alpha_state", all_pars)]
 pairs(stanFit, pars = alpha_pars)
 
-# grab all gamma-related parameters
-gamma_pars <- all_pars[grepl("gamma", all_pars)]
+alpha_means <- summary(stanFit)$summary[alpha_pars, "mean"]
+print(alpha_means)
 
+# grab all gamma-related parameters
+gamma_pars <- all_pars[grepl("gamma_state", all_pars)]
 pairs(stanFit, pars = gamma_pars)
 
-# grab all gamma-related parameters
+gamma_means <- summary(stanFit)$summary[gamma_pars, "mean"]
+print(gamma_means)
+
+# grab all l0-related parameters
 l0_pars <- all_pars[grepl("l0", all_pars)]
 
 pairs(stanFit, pars = l0_pars)
 
-
-# model fit evaluations
-k <- 4 + 3*n_state + 3 + (n_state + 1) + (n_state + 1)*m
-n <- training_end
-
-# Extract log likelihoods
-log_lik_state <- loo::extract_log_lik(stanFit, parameter_name = "log_lik_state")
-log_lik_total <- loo::extract_log_lik(stanFit, parameter_name = "log_lik_total")
-
-# Sum pointwise posterior means across all series and time points
-mean_log_lik <- sum(colMeans(log_lik_state)) + sum(colMeans(log_lik_total))
-
-# Jacobian adjustment to get back to original scale
-# One adjustment per series (n_state state series + 1 total)
-mean_log_lik_orig <- mean_log_lik - (n_state + 1) * training_end * log(Y_sd)
-
-n <- training_end * (n_state + 1)  # 96 * 8 = 768
-
-aic  <- -2 * mean_log_lik_orig + 2 * k
-aicc <- aic + (2 * k^2 + 2 * k) / (n - k - 1)
-bic  <- -2 * mean_log_lik_orig + k * log(n)
-
-cat(sprintf("n:    %d\n",   n))
-cat(sprintf("k:    %d\n",   k))
-cat(sprintf("AIC:  %.4f\n", aic))
-cat(sprintf("AICc: %.4f\n", aicc))
-cat(sprintf("BIC:  %.4f\n", bic))
 
 
 ## accuracy calculation 
@@ -321,3 +305,31 @@ summary_accuracy <- bind_rows(state_accuracy, total_accuracy) %>%
   )
 
 print(summary_accuracy)
+
+
+# # model fit evaluations
+# k <- 4 + 3*n_state + 3 + (n_state + 1) + (n_state + 1)*m
+# n <- training_end
+# 
+# # Extract log likelihoods
+# log_lik_state <- loo::extract_log_lik(stanFit, parameter_name = "log_lik_state")
+# log_lik_total <- loo::extract_log_lik(stanFit, parameter_name = "log_lik_total")
+# 
+# # Sum pointwise posterior means across all series and time points
+# mean_log_lik <- sum(colMeans(log_lik_state)) + sum(colMeans(log_lik_total))
+# 
+# # Jacobian adjustment to get back to original scale
+# # One adjustment per series (n_state state series + 1 total)
+# mean_log_lik_orig <- mean_log_lik - (n_state + 1) * training_end * log(Y_sd)
+# 
+# n <- training_end * (n_state + 1)  # 96 * 8 = 768
+# 
+# aic  <- -2 * mean_log_lik_orig + 2 * k
+# aicc <- aic + (2 * k^2 + 2 * k) / (n - k - 1)
+# bic  <- -2 * mean_log_lik_orig + k * log(n)
+# 
+# cat(sprintf("n:    %d\n",   n))
+# cat(sprintf("k:    %d\n",   k))
+# cat(sprintf("AIC:  %.4f\n", aic))
+# cat(sprintf("AICc: %.4f\n", aicc))
+# cat(sprintf("BIC:  %.4f\n", bic))
