@@ -58,18 +58,16 @@ data {
 parameters {
   // ── Hyperpriors on alpha and gamma ────────────────────────────────────────
   real<lower=0, upper=1> mu_alpha;
-  real<lower=0, upper=1> mu_gamma;
-  //real<lower=0> sigma_alpha;
-  //real<lower=0> sigma_gamma;
+  real<lower=0, upper=1> mu_gamma_raw;
 
   // ── State-level smoothing parameters ─────────────────────────────────────
   vector<lower=0, upper=1>[n_state] alpha_state;
-  vector<lower=0, upper=1>[n_state] gamma_state;
+  vector<lower=0, upper=1>[n_state] gamma_state_raw;
   vector<lower=0>[n_state]          sigma_state;
 
   // ── Total-level smoothing parameters (drawn from same hyperprior) ─────────
   real<lower=0, upper=1> alpha_total;
-  real<lower=0, upper=1> gamma_total;
+  real<lower=0, upper=1> gamma_total_raw;
   real<lower=0>          sigma_total;
 
   // ── Initial states — state level ──────────────────────────────────────────
@@ -81,6 +79,14 @@ parameters {
   vector[m]      s0_total;
 }
 transformed parameters {
+  // constraining gamma to be smaller than 1 - alpha
+  vector[n_state] gamma_state;
+  real gamma_total;
+  for (n in 1:n_state){
+    gamma_state[n] = gamma_state_raw[n] * (1 - alpha_state[n]);
+  }
+  gamma_total = gamma_total_raw * (1-alpha_total);
+  
   // ── State recursions ──────────────────────────────────────────────────────
   array[n_state] vector[T_train + 1] l_s;
   array[n_state] vector[T_train + m] s_s;
@@ -114,18 +120,16 @@ transformed parameters {
 model {
   // ── Hyperpriors ───────────────────────────────────────────────────────────
   mu_alpha ~ uniform(0,1);
-  mu_gamma ~ uniform(0,1);
-  //sigma_alpha ~ normal(0, 0.3);
-  //sigma_gamma ~ normal(0, 0.3);
+  mu_gamma_raw ~ uniform(0,1);
 
   // ── State-level priors drawn from hyperprior ──────────────────────────────
   alpha_state ~ normal(mu_alpha, 0.1);
-  gamma_state ~ normal(mu_gamma, 0.1);
+  gamma_state_raw ~ normal(mu_gamma_raw, 0.1);
   sigma_state ~ cauchy(0, 0.3);
 
   // ── Total-level priors drawn from same hyperprior ─────────────────────────
   alpha_total ~ normal(mu_alpha, 0.1);
-  gamma_total ~ normal(mu_gamma, 0.1);
+  gamma_total_raw ~ normal(mu_gamma_raw, 0.1);
   sigma_total ~ cauchy(0, 0.3);
 
   // ── Initial state priors ──────────────────────────────────────────────────
@@ -206,19 +210,27 @@ stanFit <- sampling(
 end_time <- Sys.time()
 print(end_time - start_time)
 
+# VI 
+save_seed <- 2025
+start_time <- Sys.time()
+stanFit_VB <- vb(
+  object = stanDso,
+  data   = data_list,
+  seed   = save_seed,
+  iter   = 10000, 
+  tol_rel_obj = 0.001
+)
+end_time <- Sys.time()
+print(end_time - start_time)
+
 cat("Max Rhat:  ", max(summary(stanFit)$summary[, "Rhat"],  na.rm = TRUE), "\n")
 cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
 
-summary_df <- summary(stanFit)$summary
-min_neff_idx <- which.min(summary_df[, "n_eff"])
-cat("Parameter:", rownames(summary_df)[min_neff_idx], "\n")
-cat("n_eff:", summary_df[min_neff_idx, "n_eff"], "\n")
-cat("Rhat:", summary_df[min_neff_idx, "Rhat"], "\n")
 
 View(summary(stanFit)$summary)
 
 # hyperparameters
-pairs(stanFit, pars = c("mu_alpha", "mu_gamma"))
+pairs(stanFit, pars = c("mu_alpha", "mu_gamma_raw"))
 
 # lower level parameters
 # get all parameter names from the fit

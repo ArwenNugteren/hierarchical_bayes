@@ -152,15 +152,15 @@ tourism <- tourism %>%
 ### aus total tourism
 
 aus_tourism <- tourism %>%
-  select(G)
+  select(Total)
 
-# Y_mean <- mean(aus_tourism$Total)
-# Y_sd   <- sd(aus_tourism$Total)
-Y_mean <- 0
-Y_sd <- 1
+Y_mean <- mean(aus_tourism$Total)
+Y_sd   <- sd(aus_tourism$Total)
+# Y_mean <- 0
+# Y_sd <- 1
 
 aus_tourism <- aus_tourism[1:96,] %>%
-  mutate(scaled_total = (G - Y_mean)/Y_sd)
+  mutate(scaled_total = (Total - Y_mean)/Y_sd)
 
 aus_model <- aus_tourism %>%
   model(ETS(scaled_total ~ error("A") + season("A")))
@@ -177,7 +177,7 @@ fc <- aus_model %>%
 # ── Actuals ───────────────────────────────────────────────────────────────────
 
 actuals <- tourism %>%
-  select(A) %>%
+  select(Total) %>%
   slice(97:108)
 
 # ── Accuracy ─────────────────────────────────────────────────────────────────
