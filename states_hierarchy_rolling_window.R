@@ -114,11 +114,16 @@ model {
   }
   s0_total ~ normal(0, 1);
   sum(s0_total) ~ normal(0, 0.01 * m);
-  for (n in 1:n_state)
+  
+  // ── Likelihoods ───────────────────────────────────────────────────────────
+  for (n in 1:n_state) {
     for (i in 1:T_train)
-      Y_state[i, n] ~ normal(l_s[n][i] + s_s[n][i], sigma_state[n]);
+      //Y_state[i, n] ~ normal(l_s[n][i] + s_s[n][i], sigma_state[n]);
+      target += normal_lpdf(Y_state[i,n] | l_s[n][i] + s_s[n][i], sigma_state[n]);
+  }
   for (i in 1:T_train)
-    Y_total[i] ~ normal(l_t[i] + s_t[i], sigma_total);
+    //Y_total[i] ~ normal(l_t[i] + s_t[i], sigma_total);
+    target += normal_lpdf(Y_total[i] | l_t[i] + s_t[i], sigma_total);
 }
 generated quantities {
   matrix[H, n_state] Y_fc_state;
@@ -161,10 +166,10 @@ stanFit <- sampling(
     Y_total = Y_total_w
   ),
   seed    = 2025,
-  chains  = 4,
+  chains  = 10,
   iter    = 2000,
   warmup  = 1000,
-  cores   = 4,
+  cores   = 10,
   refresh = 0
 )
 

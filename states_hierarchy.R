@@ -195,16 +195,16 @@ data_list <- list(
 
 stanDso <- stan_model(model_code = model_string)
 
-save_seed <- 2025
+save_seed <- 47
 start_time <- Sys.time()
 stanFit <- sampling(
   object = stanDso,
   data   = data_list,
   seed   = save_seed,
-  chains = 4,
+  chains = 10,
   iter   = 2000,
   warmup = 1000,
-  cores  = 4 
+  cores  = 10 
   # control = list(adapt_delta = 0.95)
 )
 end_time <- Sys.time()
@@ -228,6 +228,7 @@ cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
 
 
 View(summary(stanFit)$summary)
+View(summary(stanFit_VB)$summary)
 
 # hyperparameters
 pairs(stanFit, pars = c("mu_alpha", "mu_gamma_raw"))

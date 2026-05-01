@@ -92,6 +92,7 @@ series_of_interest <- c("Total", state_codes)
 
 training_end <- 96
 horizon      <- 12
+m <- 12
 
 
 # ── Reconciliation with MinT ───────────────────────────────────────────────────
@@ -110,13 +111,9 @@ tourism_hts <- tourism %>%
   # declare aggregation structure — Total is the sum over state
   aggregate_key(state, value = sum(value))
 
-# Check the structure looks right
-print(tourism_hts)
-# You should see rows where state is <aggregated> for the total
-
 fit_hts <- tourism_hts %>%
   filter_index(. ~ as.character(tourism$Date[training_end])) %>%
-  model(ets = ETS(value))
+  model(ets = ETS(value ~ error("A") + trend("N") + season("A", period = m)))
 
 fc_reconciled <- fit_hts %>%
   reconcile(mint = min_trace(ets, method = "mint_shrink")) %>%
@@ -186,3 +183,9 @@ fc_reconciled %>%
   mutate(state_sum = rowSums(across(all_of(state_codes))),
          diff = Total - state_sum) %>%
   summarise(max_coherence_error = max(abs(diff)))
+
+## look at parameter estimates
+fit_hts %>% 
+  tidy() %>% 
+  filter(term %in% c("alpha", "gamma")) %>% 
+  pivot_wider(names_from = term, values_from = estimate)
