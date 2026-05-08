@@ -1,6 +1,6 @@
 # ── Aggregate results ──────────────────────────────────────────────────────────
 library(dplyr)
-files <- list.files(file.path("accuracy_states_target"), 
+files <- list.files(file.path("accuracy_states_normal_kprior"), 
                     pattern    = "^accuracy_timestep_[0-9]+\\.rds$", 
                     full.names = TRUE)
 all_results_df <- bind_rows(lapply(files, readRDS))
@@ -83,7 +83,7 @@ summary_overall <- all_results_df %>%
   )
 
 save(summary_by_series_horizon, summary_by_horizon, summary_overall, all_results_df,
-     file = "state_hierarchy.RData")
+     file = "accuracy_state_coherence_kappa1.RData")
 
 print(summary_overall)
 print(summary_by_horizon)

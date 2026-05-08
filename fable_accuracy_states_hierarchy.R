@@ -217,9 +217,43 @@ for (idx in seq_along(origins)) {
 all_base_df <- bind_rows(all_base_results)
 all_mint_df <- bind_rows(all_mint_results)
 
-# ── Summary functions ──────────────────────────────────────────────────────────
+# ── Coherence helper ───────────────────────────────────────────────────────────
+
+compute_coherence <- function(df) {
+  df %>%
+    group_by(origin, horizon) %>%
+    summarise(
+      coherence_error = forecast[series == "Total"] - sum(forecast[series != "Total"]),
+      .groups = "drop"
+    )
+}
+
+summarise_coherence_by_horizon <- function(coh_df) {
+  coh_df %>%
+    group_by(horizon) %>%
+    summarise(
+      ME_coherence   = mean(coherence_error),
+      MAE_coherence  = mean(abs(coherence_error)),
+      RMSE_coherence = sqrt(mean(coherence_error^2)),
+      .groups = "drop"
+    )
+}
+
+summarise_coherence_overall <- function(coh_df) {
+  coh_df %>%
+    summarise(
+      ME_coherence   = mean(coherence_error),
+      MAE_coherence  = mean(abs(coherence_error)),
+      RMSE_coherence = sqrt(mean(coherence_error^2))
+    )
+}
+
+# ── Updated summary functions ──────────────────────────────────────────────────
 
 summarise_by_series <- function(df) {
+  coh_df  <- compute_coherence(df)
+  coh_ovr <- summarise_coherence_overall(coh_df)
+  
   df %>%
     group_by(series) %>%
     summarise(MAE      = mean(abs_error),
@@ -234,27 +268,40 @@ summarise_by_series <- function(df) {
                   RMSE     = sqrt(mean(sq_error)),
                   CRPS     = mean(crps),
                   Coverage = mean(covered))
+    ) %>%
+    mutate(
+      ME_coherence   = if_else(series == "Overall", coh_ovr$ME_coherence,   NA_real_),
+      MAE_coherence  = if_else(series == "Overall", coh_ovr$MAE_coherence,  NA_real_),
+      RMSE_coherence = if_else(series == "Overall", coh_ovr$RMSE_coherence, NA_real_)
     )
 }
 
 summarise_by_horizon <- function(df) {
+  coh_by_h <- compute_coherence(df) %>% summarise_coherence_by_horizon()
+  
   df %>%
     group_by(horizon) %>%
     summarise(MAE      = mean(abs_error),
               RMSE     = sqrt(mean(sq_error)),
               CRPS     = mean(crps),
               Coverage = mean(covered),
-              .groups  = "drop")
+              .groups  = "drop") %>%
+    left_join(coh_by_h, by = "horizon")
 }
 
 summarise_by_series_and_horizon <- function(df) {
+  coh_by_h <- compute_coherence(df) %>% summarise_coherence_by_horizon()
+  
   df %>%
     group_by(series, horizon) %>%
     summarise(MAE      = mean(abs_error),
               RMSE     = sqrt(mean(sq_error)),
               CRPS     = mean(crps),
               Coverage = mean(covered),
-              .groups  = "drop")
+              .groups  = "drop") %>%
+    left_join(coh_by_h, by = "horizon")
+  # Same note as before: coherence repeats across series within a horizon —
+  # it reflects aggregate mismatch, not a per-series contribution
 }
 
 base_series_accuracy         <- summarise_by_series(all_base_df)

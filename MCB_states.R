@@ -20,8 +20,8 @@ library(PMCMRplus)   # frdAllPairsNemenyiTest() — used internally for p-values
 # adapts automatically.
 
 bayesian_runs <- list(
-  "Bayes unweighted" = "accuracy_states_normal",
-  "Bayes lambda=2" = "accuracy_states_lambda2"
+  "Bayes unweighted" = "accuracy_states_target",
+  "Bayes kappa=592" = "accuracy_states_normal_k592"
   # "Bayes lambda=5" = "accuracy_states_lambda5"
 )
 
@@ -30,7 +30,7 @@ bayesian_runs <- list(
 fable_rdata_path <- "fable_state_hierarchy_121_origins.RData"   # e.g. "fable_state_hierarchy_121_origins.RData"
 
 # Output directory for PDFs, CSVs and RData
-output_dir <- "mcb_results"
+output_dir <- "mcb_results_coherence"
 dir.create(output_dir, showWarnings = FALSE)
 
 
@@ -289,7 +289,7 @@ cat(" ", file.path(output_dir, "mcb_pairwise_pvals.csv"), "\n")
 # ── 9. Save full results as RData ──────────────────────────────────────────────
 
 save(all_mcb_results, all_ranks, all_pvals, all_df,
-     file = file.path(output_dir, "mcb_results.RData"))
+     file = file.path(output_dir, "mcb_results_coherence.RData"))
 
-cat("\nSaved RData:", file.path(output_dir, "mcb_results.RData"), "\n")
+cat("\nSaved RData:", file.path(output_dir, "mcb_results_coherence.RData"), "\n")
 cat("\nDone.\n")

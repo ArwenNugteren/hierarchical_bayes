@@ -195,7 +195,7 @@ data_list <- list(
 
 stanDso <- stan_model(model_code = model_string)
 
-save_seed <- 47
+save_seed <- 2025
 start_time <- Sys.time()
 stanFit <- sampling(
   object = stanDso,
