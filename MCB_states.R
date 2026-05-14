@@ -20,8 +20,8 @@ library(PMCMRplus)   # frdAllPairsNemenyiTest() — used internally for p-values
 # adapts automatically.
 
 bayesian_runs <- list(
-  "Bayes unweighted" = "accuracy_states_target",
-  "Bayes kappa=592" = "accuracy_states_normal_k592"
+  "Bayes unweighted" = "accuracy_states_normal",
+  "Bayes coherency" = "accuracy_states_coherency_new"
   # "Bayes lambda=5" = "accuracy_states_lambda5"
 )
 

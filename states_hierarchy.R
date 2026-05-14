@@ -39,7 +39,7 @@ Y_sd   <- sd(Y_raw_state[1:training_end, ])
 Y_state <- (Y_raw_state - Y_mean) / Y_sd
 
 # Total: scaled by n_states equivalent (sum of states)
-Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / (Y_sd * n_state)
+Y_total_scaled <- (Y_raw_total - n_state * Y_mean) / Y_sd
 
 
 
@@ -134,12 +134,12 @@ model {
 
   // ── Initial state priors ──────────────────────────────────────────────────
   l0_state ~ normal(0, 1);
-  l0_total ~ normal(0, 1);
+  l0_total ~ normal(0, n_state);
   for (n in 1:n_state) {
     s0_state[n] ~ normal(0, 1);
-    sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
   }
-  s0_total ~ normal(0, 1);
+  sum(s0_state) ~ normal(0, 0.01 * m); // sum to zero for identfiability
+  s0_total ~ normal(0, n_state);
   sum(s0_total) ~ normal(0, 0.01 * m);
 
   // ── Likelihoods ───────────────────────────────────────────────────────────
@@ -210,51 +210,51 @@ stanFit <- sampling(
 end_time <- Sys.time()
 print(end_time - start_time)
 
-# VI 
-save_seed <- 2025
-start_time <- Sys.time()
-stanFit_VB <- vb(
-  object = stanDso,
-  data   = data_list,
-  seed   = save_seed,
-  iter   = 10000, 
-  tol_rel_obj = 0.001
-)
-end_time <- Sys.time()
-print(end_time - start_time)
+# # VI 
+# save_seed <- 2025
+# start_time <- Sys.time()
+# stanFit_VB <- vb(
+#   object = stanDso,
+#   data   = data_list,
+#   seed   = save_seed,
+#   iter   = 10000, 
+#   tol_rel_obj = 0.001
+# )
+# end_time <- Sys.time()
+# print(end_time - start_time)
 
-cat("Max Rhat:  ", max(summary(stanFit)$summary[, "Rhat"],  na.rm = TRUE), "\n")
-cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
+# cat("Max Rhat:  ", max(summary(stanFit)$summary[, "Rhat"],  na.rm = TRUE), "\n")
+# cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
 
 
-View(summary(stanFit)$summary)
-View(summary(stanFit_VB)$summary)
+# View(summary(stanFit)$summary)
+# View(summary(stanFit_VB)$summary)
 
 # hyperparameters
-pairs(stanFit, pars = c("mu_alpha", "mu_gamma_raw"))
-
-# lower level parameters
-# get all parameter names from the fit
-all_pars <- names(stanFit)
-
-# grab all alpha-related parameters
-alpha_pars <- all_pars[grepl("alpha_state", all_pars)]
-pairs(stanFit, pars = alpha_pars)
-
-alpha_means <- summary(stanFit)$summary[alpha_pars, "mean"]
-print(alpha_means)
-
-# grab all gamma-related parameters
-gamma_pars <- all_pars[grepl("gamma_state", all_pars)]
-pairs(stanFit, pars = gamma_pars)
-
-gamma_means <- summary(stanFit)$summary[gamma_pars, "mean"]
-print(gamma_means)
-
-# grab all l0-related parameters
-l0_pars <- all_pars[grepl("l0", all_pars)]
-
-pairs(stanFit, pars = l0_pars)
+# pairs(stanFit, pars = c("mu_alpha", "mu_gamma_raw"))
+# 
+# # lower level parameters
+# # get all parameter names from the fit
+# all_pars <- names(stanFit)
+# 
+# # grab all alpha-related parameters
+# alpha_pars <- all_pars[grepl("alpha_state", all_pars)]
+# pairs(stanFit, pars = alpha_pars)
+# 
+# alpha_means <- summary(stanFit)$summary[alpha_pars, "mean"]
+# print(alpha_means)
+# 
+# # grab all gamma-related parameters
+# gamma_pars <- all_pars[grepl("gamma_state", all_pars)]
+# pairs(stanFit, pars = gamma_pars)
+# 
+# gamma_means <- summary(stanFit)$summary[gamma_pars, "mean"]
+# print(gamma_means)
+# 
+# # grab all l0-related parameters
+# l0_pars <- all_pars[grepl("l0", all_pars)]
+# 
+# pairs(stanFit, pars = l0_pars)
 
 
 
@@ -271,7 +271,7 @@ fc_total_means <- colMeans(fc_total_draws)[1:horizon]                 # [horizon
 # ── Back-transform to original scale ──────────────────────────────────────────
 
 fc_state_orig <- fc_state_means * Y_sd + Y_mean
-fc_total_orig <- fc_total_means * Y_sd * n_state + Y_mean * n_state
+fc_total_orig <- fc_total_means * Y_sd + Y_mean * n_state
 
 # ── Actuals ────────────────────────────────────────────────────────────────────
 
@@ -346,3 +346,29 @@ print(summary_accuracy)
 # cat(sprintf("AIC:  %.4f\n", aic))
 # cat(sprintf("AICc: %.4f\n", aicc))
 # cat(sprintf("BIC:  %.4f\n", bic))
+
+# check initial coherence
+# Pull posterior means of reconstructed (full) seasonal initials
+s0_state_draws <- rstan::extract(stanFit, pars = "s0_state")$s0_state  # [draws x n_state x m]
+s0_total_draws <- rstan::extract(stanFit, pars = "s0_total")$s0_total  # [draws x m]
+l0_state_draws <- rstan::extract(stanFit, pars = "l0_state")$l0_state  # [draws x n_state]
+l0_total_draws <- rstan::extract(stanFit, pars = "l0_total")$l0_total  # [draws]
+
+# Posterior means
+s0_state_mean <- apply(s0_state_draws, c(2, 3), mean)  # [n_state x m]
+s0_total_mean <- colMeans(s0_total_draws)               # [m]
+l0_state_mean <- colMeans(l0_state_draws)               # [n_state]
+l0_total_mean <- mean(l0_total_draws)                   # scalar
+
+# check coherence
+
+# ── Check seasonal coherence per period ───────────────────────────────────────
+seasonal_coherence <- data.frame(
+  period         = 1:m,
+  l0_total       = l0_total_mean,
+  s0_total       = s0_total_mean,
+  sum_s0_states  = colSums(s0_state_mean),
+  sum_l0_states  = sum(l0_state_mean),
+  gap            = l0_total_mean + s0_total_mean - (sum(l0_state_mean) + colSums(s0_state_mean))
+)
+print(seasonal_coherence)

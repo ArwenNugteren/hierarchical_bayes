@@ -39,7 +39,7 @@ Y_sd   <- sd(Y_raw_state[1:training_end, ])
 Y_state <- (Y_raw_state - Y_mean) / Y_sd
 
 # Total: scaled by n_states equivalent (sum of states)
-Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / (Y_sd * n_state)
+Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / Y_sd
 
 lambda <- 1
 
@@ -137,12 +137,17 @@ model {
   // ── Initial state priors ──────────────────────────────────────────────────
   l0_state ~ normal(0, 1);
   l0_total ~ normal(0, 1);
+  
+  // for each state, we have m=12 s0_state values
+  // we sum these up to 0
   for (n in 1:n_state) {
+    // s0_state[n] returns nth row of s0_state
     s0_state[n] ~ normal(0, 1);
     sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
   }
   s0_total ~ normal(0, 1);
   sum(s0_total) ~ normal(0, 0.01 * m);
+
 
   // ── Likelihoods ───────────────────────────────────────────────────────────
   for (n in 1:n_state) {
@@ -268,7 +273,7 @@ fc_state_draws <- rstan::extract(stanFit, pars = "Y_fc_state")$Y_fc_state
 fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
 
 fc_state_orig  <- fc_state_draws[, 1:horizon, ] * Y_sd + Y_mean
-fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd * n_state + Y_mean * n_state
+fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd + Y_mean * n_state
 
 actuals_state  <- Y_raw_state[(training_end + 1):(training_end + horizon), ]  # [horizon x n_state]
 actuals_total <- Y_raw_total[(training_end + 1):(training_end + horizon)]    # [horizon]

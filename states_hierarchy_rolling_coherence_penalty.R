@@ -40,11 +40,12 @@ Y_mean_w  <- mean(Y_raw_state[train_idx, ])
 Y_sd_w    <- sd(Y_raw_state[train_idx, ])
 
 Y_state_w <- (Y_raw_state[train_idx, ] - Y_mean_w) / Y_sd_w
-Y_total_w <- (Y_raw_total[train_idx]   - Y_mean_w * n_state) / (Y_sd_w * n_state)
+Y_total_w <- (Y_raw_total[train_idx]   - Y_mean_w * n_state) / Y_sd_w
 
 # hierarchical weighting
 lambda <- 1
-kappa <- 10
+kappa <- 1
+sigma_coh <- 0.1
 
 # ── Stan model ─────────────────────────────────────────────────────────────────
 
@@ -56,27 +57,32 @@ data {
   int<lower=1> H;
   matrix[T_train, n_state] Y_state;
   vector[T_train]           Y_total;
+
   real<lower=0> lambda; 
+  real<lower=0> kappa;
+  real<lower=0> sigma_coh; 
 }
 parameters {
   real<lower=0, upper=1> mu_alpha;
   real<lower=0, upper=1> mu_gamma;
-  //real<lower=0> sigma_alpha;
-  //real<lower=0> sigma_gamma;
+  
   vector<lower=0, upper=1>[n_state] alpha_state;
   vector<lower=0, upper=1>[n_state] gamma_state;
   vector<lower=0>[n_state]          sigma_state;
+  
   real<lower=0, upper=1> alpha_total;
   real<lower=0, upper=1> gamma_total;
   real<lower=0>          sigma_total;
-  vector[n_state] l0_state;
-  matrix[n_state, m] s0_state;
+  
   real           l0_total;
   vector[m]      s0_total;
+  vector[n_state] l0_state;
+  matrix[n_state, m] s0_state;
 }
 transformed parameters {
   array[n_state] vector[T_train + 1] l_s;
   array[n_state] vector[T_train + m] s_s;
+  
   for (n in 1:n_state) {
     for (j in 1:m) s_s[n][j] = s0_state[n, j];
     l_s[n][1] = l0_state[n];
@@ -101,44 +107,57 @@ transformed parameters {
   }
 }
 model {
-  mu_alpha    ~ uniform(0, 1);
-  mu_gamma    ~ uniform(0, 1);
-  //sigma_alpha ~ normal(0, 0.3);
-  //sigma_gamma ~ normal(0, 0.3);
+  // ── Hyperpriors ───────────────────────────────────────────────────────────
+  mu_alpha ~ uniform(0,1);
+  mu_gamma ~ uniform(0,1);
+
+  // ── State-level priors drawn from hyperprior ──────────────────────────────
   alpha_state ~ normal(mu_alpha, 0.1);
   gamma_state ~ normal(mu_gamma, 0.1);
-  sigma_state ~ cauchy(0, 1);
+  sigma_state ~ cauchy(0, 0.3);
+
+  // ── Total-level priors drawn from same hyperprior ─────────────────────────
   alpha_total ~ normal(mu_alpha, 0.1);
   gamma_total ~ normal(mu_gamma, 0.1);
-  sigma_total ~ cauchy(0, 1);
+  sigma_total ~ cauchy(0, 0.3);
+
+  // ── Initial state priors ──────────────────────────────────────────────────
   l0_state ~ normal(0, 1);
-  l0_total ~ normal(0, 1);
+  l0_total ~ normal(0, n_state);
+  
+  // for each state, we have m=12 s0_state values
+  // we sum these up to 0
   for (n in 1:n_state) {
     s0_state[n] ~ normal(0, 1);
-    sum(s0_state[n]) ~ normal(0, 0.01 * m);
+    sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
   }
-  s0_total ~ normal(0, 1);
+  s0_total ~ normal(0, n_state);
   sum(s0_total) ~ normal(0, 0.01 * m);
   
+  // -- constrain initial values
+  for (k in 1:m){
+    real diff = (l0_total + s0_total[k]) - (sum(l0_state) + sum(s0_state[,k]));
+    target += kappa * normal_lpdf(diff | 0, sigma_coh);
+  }
+
   // ── Likelihoods ───────────────────────────────────────────────────────────
   for (n in 1:n_state) {
     for (i in 1:T_train){
-      //Y_state[i, n] ~ normal(l_s[n][i] + s_s[n][i], sigma_state[n]);
       target += normal_lpdf(Y_state[i,n] | l_s[n][i] + s_s[n][i], sigma_state[n]);
     }
   }
-  for (i in 1:T_train){
+  for (i in 1:T_train) {
     target += lambda * normal_lpdf(Y_total[i] | l_t[i] + s_t[i], sigma_total);
   }
-  
+    
   // coherence penalty
   for (i in 1:T_train) {
     real fitted_total = l_t[i] + s_t[i];
     real fitted_sum   = 0;
     for (n in 1:n_state)
       fitted_sum += l_s[n][i] + s_s[n][i];
-    // add penalty based on normal
-    target += normal_lpdf(fitted_total - fitted_sum | 0, kappa * sigma_total);
+  // add penalty based on normal
+    target += kappa * normal_lpdf(fitted_total - fitted_sum | 0, sigma_coh);
   }
 }
 generated quantities {
@@ -180,7 +199,9 @@ stanFit <- sampling(
     H       = horizon + 1,
     Y_state = Y_state_w,
     Y_total = Y_total_w, 
-    lambda = lambda
+    lambda = lambda, 
+    kappa = kappa, 
+    sigma_coh = sigma_coh
   ),
   seed    = 2025,
   chains  = 10,
@@ -199,7 +220,7 @@ fc_state_draws <- rstan::extract(stanFit, pars = "Y_fc_state")$Y_fc_state
 fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
 
 fc_state_orig  <- fc_state_draws[, 1:horizon, ] * Y_sd_w + Y_mean_w
-fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd_w * n_state + Y_mean_w * n_state
+fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd_w + Y_mean_w * n_state
 
 actuals_state  <- Y_raw_state[test_idx, ]
 actuals_total  <- Y_raw_total[test_idx]

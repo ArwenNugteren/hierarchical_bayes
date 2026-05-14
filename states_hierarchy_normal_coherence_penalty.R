@@ -39,10 +39,11 @@ Y_sd   <- sd(Y_raw_state[1:training_end, ])
 Y_state <- (Y_raw_state - Y_mean) / Y_sd
 
 # Total: scaled by n_states equivalent (sum of states)
-Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / (Y_sd * n_state)
+Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / Y_sd
 
 lambda <- 1
-kappa <- 592    # coherence penalty
+kappa <- 1   # coherence penalty
+sigma_coh <- 0.1  # prior mean (originally between 1.7 and 2.3)
 
 # ── Stan model ────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ data {
   
   real<lower=0> lambda; 
   real<lower=0> kappa;
+  real<lower=0> sigma_coh;
 }
 parameters {
   // ── Hyperpriors on alpha and gamma ────────────────────────────────────────
@@ -81,8 +83,6 @@ parameters {
   // ── Initial states — total level ──────────────────────────────────────────
   real           l0_total;
   vector[m]      s0_total;
-  
-  real<lower=0>   kappa_param;
 }
 transformed parameters {
   // constraining gamma to be smaller than 1 - alpha
@@ -124,9 +124,6 @@ transformed parameters {
   }
 }
 model {
-  // kappa prior
-  kappa_param ~ normal(kappa, 100);
-  
   // ── Hyperpriors ───────────────────────────────────────────────────────────
   mu_alpha ~ uniform(0,1);
   mu_gamma_raw ~ uniform(0,1);
@@ -141,15 +138,24 @@ model {
   gamma_total_raw ~ normal(mu_gamma_raw, 0.1);
   sigma_total ~ cauchy(0, 0.3);
 
-  // ── Initial state priors ──────────────────────────────────────────────────
+  // ── Initial values ──────────────────────────────────────────────────
   l0_state ~ normal(0, 1);
-  l0_total ~ normal(0, 1);
+  l0_total ~ normal(0, n_state);
+  
+  // for each state, we have m=12 s0_state values
+  // we sum these up to 0
   for (n in 1:n_state) {
     s0_state[n] ~ normal(0, 1);
     sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
   }
-  s0_total ~ normal(0, 1);
+  s0_total ~ normal(0, n_state);
   sum(s0_total) ~ normal(0, 0.01 * m);
+  
+  // -- constrain initial values
+  for (k in 1:m){
+    real diff = (l0_total + s0_total[k]) - (sum(l0_state) + sum(s0_state[,k]));
+    target += kappa * normal_lpdf(diff | 0, sigma_coh);
+  }
 
   // ── Likelihoods ───────────────────────────────────────────────────────────
   for (n in 1:n_state) {
@@ -167,8 +173,8 @@ model {
     real fitted_sum   = 0;
     for (n in 1:n_state)
       fitted_sum += l_s[n][i] + s_s[n][i];
-    // add penalty based on normal
-    target += normal_lpdf(fitted_total - fitted_sum | 0, sqrt(kappa_param) * sigma_total);
+  // add penalty based on normal
+    target += kappa * normal_lpdf(fitted_total - fitted_sum | 0, sigma_coh);
   }
 }
 generated quantities {
@@ -198,7 +204,7 @@ generated quantities {
     for (n in 1:n_state)
       fitted_sum += l_s[n][i] + s_s[n][i];
     coherence_gap[i]    = fitted_total - fitted_sum;
-    lpdf_coherence[i]   = normal_lpdf(coherence_gap[i] | 0, sqrt(kappa_param) * sigma_total);
+    lpdf_coherence[i]   = kappa * normal_lpdf(coherence_gap[i] | 0, sigma_coh);
 
     // Total contribution at this timestep
     target_contrib[i] = lpdf_state_sum[i] + lpdf_total[i] + lpdf_coherence[i];
@@ -240,7 +246,8 @@ data_list <- list(
   Y_state  = Y_state[1:training_end, ],
   Y_total  = Y_total_scaled[1:training_end], 
   lambda = lambda, 
-  kappa = kappa
+  kappa = kappa, 
+  sigma_coh = sigma_coh
 )
 
 stanDso <- stan_model(model_code = model_string)
@@ -288,8 +295,18 @@ View(diag_wide)
 # 
 # 
 # View(summary(stanFit)$summary)
+
+all_pars <- names(stanFit)
+coh_pars <- all_pars[grepl("sigma_coh", all_pars)]
+sigma_coh_mean <- summary(stanFit)$summary[coh_pars, "mean"]
+print(sigma_coh_mean)
 # View(summary(stanFit_VB)$summary)
-# 
+
+all_pars <- names(stanFit)
+sigma_pars <- all_pars[grepl("sigma", all_pars)]
+sigma_means <- summary(stanFit)$summary[sigma_pars, "mean"]
+sigma_means
+
 # # hyperparameters
 # pairs(stanFit, pars = c("mu_alpha", "mu_gamma_raw"))
 # 
@@ -324,7 +341,7 @@ fc_state_draws <- rstan::extract(stanFit, pars = "Y_fc_state")$Y_fc_state
 fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
 
 fc_state_orig  <- fc_state_draws[, 1:horizon, ] * Y_sd + Y_mean
-fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd * n_state + Y_mean * n_state
+fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd + Y_mean * n_state
 
 actuals_state  <- Y_raw_state[(training_end + 1):(training_end + horizon), ]  # [horizon x n_state]
 actuals_total <- Y_raw_total[(training_end + 1):(training_end + horizon)]    # [horizon]
@@ -406,6 +423,18 @@ coherence_overall <- coherence_by_horizon %>%
     MAE_coherence  = mean(MAE_coherence),
     RMSE_coherence = sqrt(mean(RMSE_coherence^2))  # correct aggregation for RMSE
   )
+
+# ── Forecast vs actual means by horizon ───────────────────────────────────────
+
+fc_vs_actual <- bind_rows(horizon_results) %>%
+  group_by(horizon, series) %>%
+  summarise(
+    fc_mean = mean(fc_mean),
+    actual  = mean(actual),
+    .groups = "drop"
+  ) %>%
+  mutate(gap = fc_mean - actual)
+View(fc_vs_actual)
 
 print(accuracy)
 print(coherence_overall)

@@ -40,10 +40,10 @@ Y_mean_w  <- mean(Y_raw_state[train_idx, ])
 Y_sd_w    <- sd(Y_raw_state[train_idx, ])
 
 Y_state_w <- (Y_raw_state[train_idx, ] - Y_mean_w) / Y_sd_w
-Y_total_w <- (Y_raw_total[train_idx]   - Y_mean_w * n_state) / (Y_sd_w * n_state)
+Y_total_w <- (Y_raw_total[train_idx]   - Y_mean_w * n_state) / Y_sd_w
 
 # hierarchical weighting
-lambda <- 2
+lambda <- 1
 
 # ── Stan model ─────────────────────────────────────────────────────────────────
 
@@ -188,7 +188,7 @@ fc_state_draws <- rstan::extract(stanFit, pars = "Y_fc_state")$Y_fc_state
 fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
 
 fc_state_orig  <- fc_state_draws[, 1:horizon, ] * Y_sd_w + Y_mean_w
-fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd_w * n_state + Y_mean_w * n_state
+fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd_w + Y_mean_w * n_state
 
 actuals_state  <- Y_raw_state[test_idx, ]
 actuals_total  <- Y_raw_total[test_idx]
