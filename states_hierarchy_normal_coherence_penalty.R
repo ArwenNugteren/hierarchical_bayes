@@ -42,8 +42,8 @@ Y_state <- (Y_raw_state - Y_mean) / Y_sd
 Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / Y_sd
 
 lambda <- 1
-kappa <- 1   # coherence penalty
-sigma_coh <- 0.1  # prior mean (originally between 1.7 and 2.3)
+kappa <- 0.5   # coherence penalty
+sigma_coh <- 0.1  # variance
 
 # ── Stan model ────────────────────────────────────────────────────────────────
 
@@ -76,13 +76,12 @@ parameters {
   real<lower=0, upper=1> gamma_total_raw;
   real<lower=0>          sigma_total;
 
-  // ── Initial states — state level ──────────────────────────────────────────
-  vector[n_state] l0_state;
-  matrix[n_state, m] s0_state;
-
-  // ── Initial states — total level ──────────────────────────────────────────
+  // ── Initial values  ──────────────────────────────────────────
   real           l0_total;
-  vector[m]      s0_total;
+  vector[n_state] l0_state;
+
+  matrix[n_state, m-1] s0_state_free;
+  vector[m-1]          s0_total_free;
 }
 transformed parameters {
   // constraining gamma to be smaller than 1 - alpha
@@ -92,6 +91,18 @@ transformed parameters {
     gamma_state[n] = gamma_state_raw[n] * (1 - alpha_state[n]);
   }
   gamma_total = gamma_total_raw * (1-alpha_total);
+  
+  // initial value sum-to-zero constraint
+  matrix[n_state, m] s0_state;
+  vector[m]          s0_total;
+  
+  for (n in 1:n_state) {
+    s0_state[n, 1:(m-1)] = s0_state_free[n];
+    s0_state[n, m]        = -sum(s0_state_free[n]);
+  }
+  s0_total[1:(m-1)] = s0_total_free;
+  s0_total[m]        = -sum(s0_total_free);
+  
   
   // ── State recursions ──────────────────────────────────────────────────────
   array[n_state] vector[T_train + 1] l_s;
@@ -142,14 +153,8 @@ model {
   l0_state ~ normal(0, 1);
   l0_total ~ normal(0, n_state);
   
-  // for each state, we have m=12 s0_state values
-  // we sum these up to 0
-  for (n in 1:n_state) {
-    s0_state[n] ~ normal(0, 1);
-    sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
-  }
-  s0_total ~ normal(0, n_state);
-  sum(s0_total) ~ normal(0, 0.01 * m);
+  to_vector(s0_state_free) ~ normal(0, 1); 
+  s0_total_free ~ normal(0, n_state);
   
   // -- constrain initial values
   for (k in 1:m){

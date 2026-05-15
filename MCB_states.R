@@ -20,8 +20,9 @@ library(PMCMRplus)   # frdAllPairsNemenyiTest() — used internally for p-values
 # adapts automatically.
 
 bayesian_runs <- list(
-  "Bayes unweighted" = "accuracy_states_normal",
-  "Bayes coherency" = "accuracy_states_coherency_new"
+  "Bayes base" = "accuracy_states_base_fixed_seasonal",
+  "Bayes sigma 0.1" = "accuracy_states_coherency_k1_sigma0.1_fixed_seasonal", 
+  "Bayes sigma 0.2" = "accuracy_states_coherency_k1_sigma0.2_fixed_seasonal"
   # "Bayes lambda=5" = "accuracy_states_lambda5"
 )
 
@@ -30,7 +31,7 @@ bayesian_runs <- list(
 fable_rdata_path <- "fable_state_hierarchy_121_origins.RData"   # e.g. "fable_state_hierarchy_121_origins.RData"
 
 # Output directory for PDFs, CSVs and RData
-output_dir <- "mcb_results_coherence"
+output_dir <- "mcb_results_coherence_sigma"
 dir.create(output_dir, showWarnings = FALSE)
 
 

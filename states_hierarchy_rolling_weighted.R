@@ -111,12 +111,12 @@ model {
   gamma_total ~ normal(mu_gamma, 0.1);
   sigma_total ~ cauchy(0, 1);
   l0_state ~ normal(0, 1);
-  l0_total ~ normal(0, 1);
+  l0_total ~ normal(0, n_state);
   for (n in 1:n_state) {
     s0_state[n] ~ normal(0, 1);
     sum(s0_state[n]) ~ normal(0, 0.01 * m);
   }
-  s0_total ~ normal(0, 1);
+  s0_total ~ normal(0, n_state);
   sum(s0_total) ~ normal(0, 0.01 * m);
   
   // ── Likelihoods ───────────────────────────────────────────────────────────

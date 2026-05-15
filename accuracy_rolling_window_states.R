@@ -1,6 +1,6 @@
 # ── Aggregate results ──────────────────────────────────────────────────────────
 library(dplyr)
-files <- list.files(file.path("accuracy_states_coherency_new"), 
+files <- list.files(file.path("accuracy"), 
                     pattern    = "^accuracy_timestep_[0-9]+\\.rds$", 
                     full.names = TRUE)
 all_results_df <- bind_rows(lapply(files, readRDS))

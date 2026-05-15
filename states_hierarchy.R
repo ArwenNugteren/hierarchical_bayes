@@ -70,13 +70,12 @@ parameters {
   real<lower=0, upper=1> gamma_total_raw;
   real<lower=0>          sigma_total;
 
-  // ── Initial states — state level ──────────────────────────────────────────
-  vector[n_state] l0_state;
-  matrix[n_state, m] s0_state;
-
-  // ── Initial states — total level ──────────────────────────────────────────
+  // ── Initial values  ──────────────────────────────────────────
   real           l0_total;
-  vector[m]      s0_total;
+  vector[n_state] l0_state;
+
+  matrix[n_state, m-1] s0_state_free;
+  vector[m-1]          s0_total_free;
 }
 transformed parameters {
   // constraining gamma to be smaller than 1 - alpha
@@ -86,6 +85,19 @@ transformed parameters {
     gamma_state[n] = gamma_state_raw[n] * (1 - alpha_state[n]);
   }
   gamma_total = gamma_total_raw * (1-alpha_total);
+  
+  
+  // initial value sum-to-zero constraint
+  matrix[n_state, m] s0_state;
+  vector[m]          s0_total;
+  
+  for (n in 1:n_state) {
+    s0_state[n, 1:(m-1)] = s0_state_free[n];
+    s0_state[n, m]        = -sum(s0_state_free[n]);
+  }
+  s0_total[1:(m-1)] = s0_total_free;
+  s0_total[m]        = -sum(s0_total_free);
+  
   
   // ── State recursions ──────────────────────────────────────────────────────
   array[n_state] vector[T_train + 1] l_s;
@@ -132,15 +144,23 @@ model {
   gamma_total_raw ~ normal(mu_gamma_raw, 0.1);
   sigma_total ~ cauchy(0, 0.3);
 
-  // ── Initial state priors ──────────────────────────────────────────────────
+  // ── Initial values ──────────────────────────────────────────────────
   l0_state ~ normal(0, 1);
   l0_total ~ normal(0, n_state);
-  for (n in 1:n_state) {
-    s0_state[n] ~ normal(0, 1);
-  }
-  sum(s0_state) ~ normal(0, 0.01 * m); // sum to zero for identfiability
-  s0_total ~ normal(0, n_state);
-  sum(s0_total) ~ normal(0, 0.01 * m);
+  
+  to_vector(s0_state_free) ~ normal(0, 1); 
+  s0_total_free ~ normal(0, n_state);
+  
+  // for each state, we have m=12 s0_state values
+  // we sum these up to 0
+  //for (n in 1:n_state) {
+    //s0_state[n] ~ normal(0, 1);
+    //sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
+    //s0_state[n,m] = - sum(s0_state[n, 1:(m-1)]); // strict sum-to-zero constraint
+  //}
+  //s0_total ~ normal(0, n_state);
+  //sum(s0_total) ~ normal(0, 0.01 * m);
+  //s0_total[m] = -sum(s0_total[1:(m-1)]);
 
   // ── Likelihoods ───────────────────────────────────────────────────────────
   for (n in 1:n_state) {
@@ -258,66 +278,108 @@ print(end_time - start_time)
 
 
 
-## accuracy calculation 
+# ── accuracy calculation ─────────────────────────────────────────────────
 fc_state_draws <- rstan::extract(stanFit, pars = "Y_fc_state")$Y_fc_state
 fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
-# fc_state_draws is [n_draws x H x n_state]
-# fc_total_draws is [n_draws x H]
 
-# Take posterior means, drop the last horizon (H = horizon + 1)
-fc_state_means <- apply(fc_state_draws, c(2, 3), mean)[1:horizon, ]  # [horizon x n_state]
-fc_total_means <- colMeans(fc_total_draws)[1:horizon]                 # [horizon]
+fc_state_orig  <- fc_state_draws[, 1:horizon, ] * Y_sd + Y_mean
+fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd + Y_mean * n_state
 
-# ── Back-transform to original scale ──────────────────────────────────────────
-
-fc_state_orig <- fc_state_means * Y_sd + Y_mean
-fc_total_orig <- fc_total_means * Y_sd + Y_mean * n_state
-
-# ── Actuals ────────────────────────────────────────────────────────────────────
-
-actuals_state <- Y_raw_state[(training_end + 1):(training_end + horizon), ]  # [horizon x n_state]
+actuals_state  <- Y_raw_state[(training_end + 1):(training_end + horizon), ]  # [horizon x n_state]
 actuals_total <- Y_raw_total[(training_end + 1):(training_end + horizon)]    # [horizon]
 
-# ── Per-series accuracy ────────────────────────────────────────────────────────
 
-state_accuracy <- lapply(1:n_state, function(s) {
-  errors <- fc_state_orig[, s] - actuals_state[, s]
-  data.frame(
-    series  = state_codes[s],
-    horizon = 1:horizon,
-    actual  = actuals_state[, s],
-    forecast = fc_state_orig[, s],
-    error   = errors,
-    mae     = mean(abs(errors)),
-    rmse    = sqrt(mean(errors^2))
-  )
-}) %>% bind_rows()
+# ── Compute per-horizon accuracy ───────────────────────────────────────────────
 
-# Total series accuracy
-total_errors <- fc_total_orig - actuals_total
-total_accuracy <- data.frame(
-  series   = "Total",
-  horizon  = 1:horizon,
-  actual   = actuals_total,
-  forecast = fc_total_orig,
-  error    = total_errors,
-  mae      = mean(abs(total_errors)),
-  rmse     = sqrt(mean(total_errors^2))
-)
-
-# ── Summary table ──────────────────────────────────────────────────────────────
-
-summary_accuracy <- bind_rows(state_accuracy, total_accuracy) %>%
-  group_by(series) %>%
-  summarise(MAE = first(mae), RMSE = first(rmse), .groups = "drop") %>%
+horizon_results <- lapply(1:horizon, function(h) {
+  
+  series_results <- lapply(1:n_state, function(s) {
+    draws  <- fc_state_orig[, h, s]
+    actual <- actuals_state[h, s]
+    q05    <- quantile(draws, 0.05)
+    q95    <- quantile(draws, 0.95)
+    data.frame(
+      origin  = training_end,
+      horizon = h,
+      series  = state_codes[s],
+      actual  = actual,
+      fc_mean = mean(draws),
+      ae      = abs(mean(draws) - actual),
+      se      = (mean(draws) - actual)^2,
+      crps    = scoringRules::crps_sample(actual, draws),
+      logS    = scoringRules::logs_sample(actual, draws),
+      covered = as.integer(actual >= q05 & actual <= q95)
+    )
+  })
+  
+  draws_t  <- fc_total_orig[, h]
+  actual_t <- actuals_total[h]
+  q05_t    <- quantile(draws_t, 0.05)
+  q95_t    <- quantile(draws_t, 0.95)
+  
   bind_rows(
-    bind_rows(state_accuracy, total_accuracy) %>%
-      summarise(series = "Overall", 
-                MAE  = mean(abs(error)), 
-                RMSE = sqrt(mean(error^2)))
+    series_results,
+    data.frame(
+      origin  = training_end,
+      horizon = h,
+      series  = "Total",
+      actual  = actual_t,
+      fc_mean = mean(draws_t),
+      ae      = abs(mean(draws_t) - actual_t),
+      se      = (mean(draws_t) - actual_t)^2,
+      crps    = scoringRules::crps_sample(actual_t, draws_t),
+      logS    = scoringRules::logs_sample(actual_t, draws_t),
+      covered = as.integer(actual_t >= q05_t & actual_t <= q95_t)
+    )
+  )
+})
+
+accuracy <- bind_rows(horizon_results) %>%
+  group_by(series) %>%
+  summarise(
+    MAE      = mean(ae),
+    RMSE     = sqrt(mean(se)),
+    CRPS     = mean(crps),
+    LogS     = mean(logS),
+    Coverage = mean(covered),
+    .groups  = "drop")
+# ── Coherence accuracy ─────────────────────────────────────────────────────────
+# fc_state_orig: [draws x horizon x n_state], fc_total_orig: [draws x horizon]
+
+coherence_results <- lapply(1:horizon, function(h) {
+  total_mean     <- mean(fc_total_orig[, h])
+  state_sum_mean <- sum(apply(fc_state_orig[, h, ], 2, mean))  # mean per state, then sum
+  gap            <- total_mean - state_sum_mean
+  
+  data.frame(
+    horizon        = h,
+    MAE_coherence  = abs(gap),
+    RMSE_coherence = sqrt(gap^2)
+  )
+})
+
+coherence_by_horizon <- bind_rows(coherence_results)
+
+coherence_overall <- coherence_by_horizon %>%
+  summarise(
+    MAE_coherence  = mean(MAE_coherence),
+    RMSE_coherence = sqrt(mean(RMSE_coherence^2))  # correct aggregation for RMSE
   )
 
-print(summary_accuracy)
+# ── Forecast vs actual means by horizon ───────────────────────────────────────
+
+fc_vs_actual <- bind_rows(horizon_results) %>%
+  group_by(horizon, series) %>%
+  summarise(
+    fc_mean = mean(fc_mean),
+    actual  = mean(actual),
+    .groups = "drop"
+  ) %>%
+  mutate(gap = fc_mean - actual)
+View(fc_vs_actual)
+
+print(accuracy)
+print(coherence_overall)
 
 
 # # model fit evaluations
@@ -346,29 +408,29 @@ print(summary_accuracy)
 # cat(sprintf("AIC:  %.4f\n", aic))
 # cat(sprintf("AICc: %.4f\n", aicc))
 # cat(sprintf("BIC:  %.4f\n", bic))
-
-# check initial coherence
-# Pull posterior means of reconstructed (full) seasonal initials
-s0_state_draws <- rstan::extract(stanFit, pars = "s0_state")$s0_state  # [draws x n_state x m]
-s0_total_draws <- rstan::extract(stanFit, pars = "s0_total")$s0_total  # [draws x m]
-l0_state_draws <- rstan::extract(stanFit, pars = "l0_state")$l0_state  # [draws x n_state]
-l0_total_draws <- rstan::extract(stanFit, pars = "l0_total")$l0_total  # [draws]
-
-# Posterior means
-s0_state_mean <- apply(s0_state_draws, c(2, 3), mean)  # [n_state x m]
-s0_total_mean <- colMeans(s0_total_draws)               # [m]
-l0_state_mean <- colMeans(l0_state_draws)               # [n_state]
-l0_total_mean <- mean(l0_total_draws)                   # scalar
-
-# check coherence
-
-# ── Check seasonal coherence per period ───────────────────────────────────────
-seasonal_coherence <- data.frame(
-  period         = 1:m,
-  l0_total       = l0_total_mean,
-  s0_total       = s0_total_mean,
-  sum_s0_states  = colSums(s0_state_mean),
-  sum_l0_states  = sum(l0_state_mean),
-  gap            = l0_total_mean + s0_total_mean - (sum(l0_state_mean) + colSums(s0_state_mean))
-)
-print(seasonal_coherence)
+# 
+# # check initial coherence
+# # Pull posterior means of reconstructed (full) seasonal initials
+# s0_state_draws <- rstan::extract(stanFit, pars = "s0_state")$s0_state  # [draws x n_state x m]
+# s0_total_draws <- rstan::extract(stanFit, pars = "s0_total")$s0_total  # [draws x m]
+# l0_state_draws <- rstan::extract(stanFit, pars = "l0_state")$l0_state  # [draws x n_state]
+# l0_total_draws <- rstan::extract(stanFit, pars = "l0_total")$l0_total  # [draws]
+# 
+# # Posterior means
+# s0_state_mean <- apply(s0_state_draws, c(2, 3), mean)  # [n_state x m]
+# s0_total_mean <- colMeans(s0_total_draws)               # [m]
+# l0_state_mean <- colMeans(l0_state_draws)               # [n_state]
+# l0_total_mean <- mean(l0_total_draws)                   # scalar
+# 
+# # check coherence
+# 
+# # ── Check seasonal coherence per period ───────────────────────────────────────
+# seasonal_coherence <- data.frame(
+#   period         = 1:m,
+#   l0_total       = l0_total_mean,
+#   s0_total       = s0_total_mean,
+#   sum_s0_states  = colSums(s0_state_mean),
+#   sum_l0_states  = sum(l0_state_mean),
+#   gap            = l0_total_mean + s0_total_mean - (sum(l0_state_mean) + colSums(s0_state_mean))
+# )
+# print(seasonal_coherence)
