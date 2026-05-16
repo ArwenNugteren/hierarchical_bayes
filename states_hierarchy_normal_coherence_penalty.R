@@ -42,7 +42,6 @@ Y_state <- (Y_raw_state - Y_mean) / Y_sd
 Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / Y_sd
 
 lambda <- 1
-kappa <- 0.5   # coherence penalty
 sigma_coh <- 0.1  # variance
 
 # ── Stan model ────────────────────────────────────────────────────────────────
@@ -58,7 +57,6 @@ data {
   vector[T_train]           Y_total;
   
   real<lower=0> lambda; 
-  real<lower=0> kappa;
   real<lower=0> sigma_coh;
 }
 parameters {
@@ -159,7 +157,7 @@ model {
   // -- constrain initial values
   for (k in 1:m){
     real diff = (l0_total + s0_total[k]) - (sum(l0_state) + sum(s0_state[,k]));
-    target += kappa * normal_lpdf(diff | 0, sigma_coh);
+    target += normal_lpdf(diff | 0, sigma_coh);
   }
 
   // ── Likelihoods ───────────────────────────────────────────────────────────
@@ -179,7 +177,7 @@ model {
     for (n in 1:n_state)
       fitted_sum += l_s[n][i] + s_s[n][i];
   // add penalty based on normal
-    target += kappa * normal_lpdf(fitted_total - fitted_sum | 0, sigma_coh);
+    target += normal_lpdf(fitted_total - fitted_sum | 0, sigma_coh);
   }
 }
 generated quantities {
@@ -209,7 +207,7 @@ generated quantities {
     for (n in 1:n_state)
       fitted_sum += l_s[n][i] + s_s[n][i];
     coherence_gap[i]    = fitted_total - fitted_sum;
-    lpdf_coherence[i]   = kappa * normal_lpdf(coherence_gap[i] | 0, sigma_coh);
+    lpdf_coherence[i]   = normal_lpdf(coherence_gap[i] | 0, sigma_coh);
 
     // Total contribution at this timestep
     target_contrib[i] = lpdf_state_sum[i] + lpdf_total[i] + lpdf_coherence[i];
@@ -251,7 +249,6 @@ data_list <- list(
   Y_state  = Y_state[1:training_end, ],
   Y_total  = Y_total_scaled[1:training_end], 
   lambda = lambda, 
-  kappa = kappa, 
   sigma_coh = sigma_coh
 )
 

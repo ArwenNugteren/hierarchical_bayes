@@ -43,8 +43,7 @@ Y_state_w <- (Y_raw_state[train_idx, ] - Y_mean_w) / Y_sd_w
 Y_total_w <- (Y_raw_total[train_idx]   - Y_mean_w * n_state) / Y_sd_w
 
 # hierarchical weighting
-lambda <- 7
-kappa <- 1
+lambda <- 1
 sigma_coh <- 0.1
 
 # ── Stan model ─────────────────────────────────────────────────────────────────
@@ -59,7 +58,6 @@ data {
   vector[T_train]           Y_total;
 
   real<lower=0> lambda; 
-  real<lower=0> kappa;
   real<lower=0> sigma_coh; 
 }
 parameters {
@@ -148,7 +146,7 @@ model {
   // -- constrain initial values
   for (k in 1:m){
     real diff = (l0_total + s0_total[k]) - (sum(l0_state) + sum(s0_state[,k]));
-    target += kappa * normal_lpdf(diff | 0, sigma_coh);
+    target += normal_lpdf(diff | 0, sigma_coh);
   }
 
   // ── Likelihoods ───────────────────────────────────────────────────────────
@@ -168,7 +166,7 @@ model {
     for (n in 1:n_state)
       fitted_sum += l_s[n][i] + s_s[n][i];
   // add penalty based on normal
-    target += kappa * normal_lpdf(fitted_total - fitted_sum | 0, sigma_coh);
+    target += normal_lpdf(fitted_total - fitted_sum | 0, sigma_coh);
   }
 }
 generated quantities {
@@ -211,7 +209,6 @@ stanFit <- sampling(
     Y_state = Y_state_w,
     Y_total = Y_total_w, 
     lambda = lambda, 
-    kappa = kappa, 
     sigma_coh = sigma_coh
   ),
   seed    = 2025,

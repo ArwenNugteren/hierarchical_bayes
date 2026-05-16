@@ -7,41 +7,28 @@ library(scoringRules)
 
 load("tourism.Rdata")
 
-# times
 training_end <- 96
 m            <- 12L
 horizon      <- 12
 
-# State series A-G (single letter codes)
 state_codes <- names(tourism)[grepl("^[A-G]$", names(tourism))]
 n_state     <- length(state_codes)
 
-# Number of bottom-level series per state (for consistent scaling)
-# Count series matching "^X" where X is the state letter
 series_cols <- setdiff(names(tourism), c("Date", "Total",
                                          names(tourism)[grepl("^Total", names(tourism))]))
-
-regions_per_state <- sapply(state_codes, function(s) {
-  sum(grepl(paste0("^", s, "[A-Z]{2}(Hol|Vis|Bus|Oth)$"), names(tourism)))
-})
-regions_per_total <- sum(regions_per_state)
 
 Y_raw_state <- tourism %>% select(all_of(state_codes)) %>% as.matrix()
 Y_raw_total <- tourism %>% pull(Total)
 
-
-# Scale from bottom-level region data, consistent with earlier approach
-# Use the state-level training data to define scale
 Y_mean <- mean(Y_raw_state[1:training_end, ])
 Y_sd   <- sd(Y_raw_state[1:training_end, ])
 
-# States: standard scaling
-Y_state <- (Y_raw_state - Y_mean) / Y_sd
-
-# Total: scaled by n_states equivalent (sum of states)
+Y_state        <- (Y_raw_state - Y_mean) / Y_sd
 Y_total_scaled <- (Y_raw_total - Y_mean * n_state) / Y_sd
 
-lambda <- 1
+lambda    <- 1
+kappa     <- 1
+sigma_coh <- 1
 
 # ── Stan model ────────────────────────────────────────────────────────────────
 
@@ -54,44 +41,49 @@ data {
 
   matrix[T_train, n_state] Y_state;
   vector[T_train]           Y_total;
-  
-  real<lower=0> lambda; 
+
+  real<lower=0> lambda;
 }
 parameters {
-  // ── Hyperpriors on alpha and gamma ────────────────────────────────────────
-  real<lower=0, upper=1> mu_alpha;
-  real<lower=0, upper=1> mu_gamma_raw;
-
-  // ── State-level smoothing parameters ─────────────────────────────────────
+  // ── State-level smoothing parameters (independent, no hyperprior) ─────────
   vector<lower=0, upper=1>[n_state] alpha_state;
   vector<lower=0, upper=1>[n_state] gamma_state_raw;
   vector<lower=0>[n_state]          sigma_state;
 
-  // ── Total-level smoothing parameters (drawn from same hyperprior) ─────────
+  // ── Total-level smoothing parameters (independent, no hyperprior) ─────────
   real<lower=0, upper=1> alpha_total;
   real<lower=0, upper=1> gamma_total_raw;
   real<lower=0>          sigma_total;
 
-  // ── Initial states — state level ──────────────────────────────────────────
-  vector[n_state] l0_state;
-  matrix[n_state, m] s0_state;
-
-  // ── Initial states — total level ──────────────────────────────────────────
+  // ── Initial values  ──────────────────────────────────────────
   real           l0_total;
-  vector[m]      s0_total;
+  vector[n_state] l0_state;
+
+  matrix[n_state, m-1] s0_state_free;
+  vector[m-1]          s0_total_free;
 }
 transformed parameters {
-  // constraining gamma to be smaller than 1 - alpha
   vector[n_state] gamma_state;
   real gamma_total;
-  for (n in 1:n_state){
+  for (n in 1:n_state)
     gamma_state[n] = gamma_state_raw[n] * (1 - alpha_state[n]);
-  }
-  gamma_total = gamma_total_raw * (1-alpha_total);
+  gamma_total = gamma_total_raw * (1 - alpha_total);
   
+  // initial value sum-to-zero constraint
+  matrix[n_state, m] s0_state;
+  vector[m]          s0_total;
+  
+  for (n in 1:n_state) {
+    s0_state[n, 1:(m-1)] = s0_state_free[n];
+    s0_state[n, m]        = -sum(s0_state_free[n]);
+  }
+  s0_total[1:(m-1)] = s0_total_free;
+  s0_total[m]        = -sum(s0_total_free);
+
   // ── State recursions ──────────────────────────────────────────────────────
   array[n_state] vector[T_train + 1] l_s;
   array[n_state] vector[T_train + m] s_s;
+
 
   for (n in 1:n_state) {
     for (j in 1:m) s_s[n][j] = s0_state[n, j];
@@ -120,48 +112,56 @@ transformed parameters {
   }
 }
 model {
-  // ── Hyperpriors ───────────────────────────────────────────────────────────
-  mu_alpha ~ uniform(0,1);
-  mu_gamma_raw ~ uniform(0,1);
+  // ── Independent flat priors — no shared hyperprior ────────────────────────
+  alpha_state     ~ uniform(0, 1);
+  gamma_state_raw ~ uniform(0, 1);
+  sigma_state     ~ cauchy(0, 0.3);
 
-  // ── State-level priors drawn from hyperprior ──────────────────────────────
-  alpha_state ~ normal(mu_alpha, 0.1);
-  gamma_state_raw ~ normal(mu_gamma_raw, 0.1);
-  sigma_state ~ cauchy(0, 0.3);
+  alpha_total     ~ uniform(0, 1);
+  gamma_total_raw ~ uniform(0, 1);
+  sigma_total     ~ cauchy(0, 0.3);
 
-  // ── Total-level priors drawn from same hyperprior ─────────────────────────
-  alpha_total ~ normal(mu_alpha, 0.1);
-  gamma_total_raw ~ normal(mu_gamma_raw, 0.1);
-  sigma_total ~ cauchy(0, 0.3);
-
-  // ── Initial state priors ──────────────────────────────────────────────────
+  // ── Initial values ──────────────────────────────────────────────────
   l0_state ~ normal(0, 1);
-  l0_total ~ normal(0, 1);
+  l0_total ~ normal(0, n_state);
   
-  // for each state, we have m=12 s0_state values
-  // we sum these up to 0
-  for (n in 1:n_state) {
-    // s0_state[n] returns nth row of s0_state
-    s0_state[n] ~ normal(0, 1);
-    sum(s0_state[n]) ~ normal(0, 0.01 * m); // sum to zero for identfiability
-  }
-  s0_total ~ normal(0, 1);
-  sum(s0_total) ~ normal(0, 0.01 * m);
-
+  to_vector(s0_state_free) ~ normal(0, 1); 
+  s0_total_free ~ normal(0, n_state);
 
   // ── Likelihoods ───────────────────────────────────────────────────────────
   for (n in 1:n_state) {
     for (i in 1:T_train)
-      //Y_state[i, n] ~ normal(l_s[n][i] + s_s[n][i], sigma_state[n]);
       target += normal_lpdf(Y_state[i,n] | l_s[n][i] + s_s[n][i], sigma_state[n]);
   }
   for (i in 1:T_train)
-    //Y_total[i] ~ normal(l_t[i] + s_t[i], sigma_total);
     target += lambda * normal_lpdf(Y_total[i] | l_t[i] + s_t[i], sigma_total);
 }
 generated quantities {
   matrix[H, n_state] Y_fc_state;
   vector[H]          Y_fc_total;
+
+  // ── Diagnostics ───────────────────────────────────────────────────────────
+  vector[T_train] lpdf_state_sum;
+  vector[T_train] lpdf_total;
+  vector[T_train] coherence_gap;
+  vector[T_train] target_contrib;
+
+  for (i in 1:T_train) {
+    real state_ll = 0;
+    for (n in 1:n_state)
+      state_ll += normal_lpdf(Y_state[i,n] | l_s[n][i] + s_s[n][i], sigma_state[n]);
+    lpdf_state_sum[i] = state_ll;
+
+    lpdf_total[i] = lambda * normal_lpdf(Y_total[i] | l_t[i] + s_t[i], sigma_total);
+
+    real fitted_total = l_t[i] + s_t[i];
+    real fitted_sum   = 0;
+    for (n in 1:n_state)
+      fitted_sum += l_s[n][i] + s_s[n][i];
+    coherence_gap[i]  = fitted_total - fitted_sum;
+
+    target_contrib[i] = lpdf_state_sum[i] + lpdf_total[i];
+  }
 
   // ── State forecasts ───────────────────────────────────────────────────────
   for (n in 1:n_state) {
@@ -194,18 +194,18 @@ generated quantities {
 # ── Data list ─────────────────────────────────────────────────────────────────
 
 data_list <- list(
-  T_train  = training_end,
-  m        = m,
-  n_state  = n_state,
-  H        = horizon + 1,
-  Y_state  = Y_state[1:training_end, ],
-  Y_total  = Y_total_scaled[1:training_end], 
-  lambda = lambda
+  T_train   = training_end,
+  m         = m,
+  n_state   = n_state,
+  H         = horizon + 1,
+  Y_state   = Y_state[1:training_end, ],
+  Y_total   = Y_total_scaled[1:training_end],
+  lambda    = lambda
 )
 
 stanDso <- stan_model(model_code = model_string)
 
-save_seed <- 2025
+save_seed  <- 2025
 start_time <- Sys.time()
 stanFit <- sampling(
   object = stanDso,
@@ -215,74 +215,47 @@ stanFit <- sampling(
   iter   = 2000,
   warmup = 1000,
   cores  = 10
-  # control = list(adapt_delta = 0.95)
 )
 end_time <- Sys.time()
 print(end_time - start_time)
 
-# # VI 
-# save_seed <- 2025
-# start_time <- Sys.time()
-# stanFit_VB <- vb(
-#   object = stanDso,
-#   data   = data_list,
-#   seed   = save_seed,
-#   iter   = 10000, 
-#   tol_rel_obj = 0.001
-# )
-# end_time <- Sys.time()
-# print(end_time - start_time)
+cat("Max Rhat:  ", max(summary(stanFit)$summary[, "Rhat"],  na.rm = TRUE), "\n")
+cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
 
-# cat("Max Rhat:  ", max(summary(stanFit)$summary[, "Rhat"],  na.rm = TRUE), "\n")
-# cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
-# 
-# 
-# View(summary(stanFit)$summary)
-# View(summary(stanFit_VB)$summary)
-# 
-# # hyperparameters
-# pairs(stanFit, pars = c("mu_alpha", "mu_gamma_raw"))
-# 
-# # lower level parameters
-# # get all parameter names from the fit
-# all_pars <- names(stanFit)
-# 
-# # grab all alpha-related parameters
-# alpha_pars <- all_pars[grepl("alpha_state", all_pars)]
-# pairs(stanFit, pars = alpha_pars)
-# 
-# alpha_means <- summary(stanFit)$summary[alpha_pars, "mean"]
-# print(alpha_means)
-# 
-# # grab all gamma-related parameters
-# gamma_pars <- all_pars[grepl("gamma_state", all_pars)]
-# pairs(stanFit, pars = gamma_pars)
-# 
-# gamma_means <- summary(stanFit)$summary[gamma_pars, "mean"]
-# print(gamma_means)
-# 
-# # grab all l0-related parameters
-# l0_pars <- all_pars[grepl("l0", all_pars)]
-# 
-# pairs(stanFit, pars = l0_pars)
+# ── Diagnostics ───────────────────────────────────────────────────────────────
 
+diag_vars <- c("lpdf_state_sum", "lpdf_total", "coherence_gap",
+              "target_contrib")
 
+diag_summary <- lapply(diag_vars, function(v) {
+  draws <- rstan::extract(stanFit, pars = v)[[v]]
+  data.frame(
+    timestep = 1:training_end,
+    variable = v,
+    mean     = colMeans(draws),
+    q05      = apply(draws, 2, quantile, 0.05),
+    q95      = apply(draws, 2, quantile, 0.95)
+  )
+}) %>% bind_rows()
 
-# ── accuracy calculation ─────────────────────────────────────────────────
+diag_wide <- diag_summary %>%
+  select(timestep, variable, mean) %>%
+  tidyr::pivot_wider(names_from = variable, values_from = mean)
+
+View(diag_wide)
+
+# ── Accuracy calculation ───────────────────────────────────────────────────────
+
 fc_state_draws <- rstan::extract(stanFit, pars = "Y_fc_state")$Y_fc_state
 fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
 
-fc_state_orig  <- fc_state_draws[, 1:horizon, ] * Y_sd + Y_mean
-fc_total_orig  <- fc_total_draws[, 1:horizon]   * Y_sd + Y_mean * n_state
+fc_state_orig <- fc_state_draws[, 1:horizon, ] * Y_sd + Y_mean
+fc_total_orig <- fc_total_draws[, 1:horizon]   * Y_sd + Y_mean * n_state
 
-actuals_state  <- Y_raw_state[(training_end + 1):(training_end + horizon), ]  # [horizon x n_state]
-actuals_total <- Y_raw_total[(training_end + 1):(training_end + horizon)]    # [horizon]
-
-
-# ── Compute per-horizon accuracy ───────────────────────────────────────────────
+actuals_state <- Y_raw_state[(training_end + 1):(training_end + horizon), ]
+actuals_total <- Y_raw_total[(training_end + 1):(training_end + horizon)]
 
 horizon_results <- lapply(1:horizon, function(h) {
-  
   series_results <- lapply(1:n_state, function(s) {
     draws  <- fc_state_orig[, h, s]
     actual <- actuals_state[h, s]
@@ -332,15 +305,27 @@ accuracy <- bind_rows(horizon_results) %>%
     CRPS     = mean(crps),
     LogS     = mean(logS),
     Coverage = mean(covered),
-    .groups  = "drop")
-# ── Coherence accuracy ─────────────────────────────────────────────────────────
-# fc_state_orig: [draws x horizon x n_state], fc_total_orig: [draws x horizon]
+    .groups  = "drop"
+  )
+
+# ── Forecast vs actual means by horizon ───────────────────────────────────────
+
+fc_vs_actual <- bind_rows(horizon_results) %>%
+  group_by(horizon, series) %>%
+  summarise(
+    fc_mean = mean(fc_mean),
+    actual  = mean(actual),
+    .groups = "drop"
+  ) %>%
+  mutate(gap = fc_mean - actual)
+View(fc_vs_actual)
+
+# ── Coherence accuracy ────────────────────────────────────────────────────────
 
 coherence_results <- lapply(1:horizon, function(h) {
   total_mean     <- mean(fc_total_orig[, h])
-  state_sum_mean <- sum(apply(fc_state_orig[, h, ], 2, mean))  # mean per state, then sum
+  state_sum_mean <- sum(apply(fc_state_orig[, h, ], 2, mean))
   gap            <- total_mean - state_sum_mean
-  
   data.frame(
     horizon        = h,
     MAE_coherence  = abs(gap),
@@ -353,9 +338,8 @@ coherence_by_horizon <- bind_rows(coherence_results)
 coherence_overall <- coherence_by_horizon %>%
   summarise(
     MAE_coherence  = mean(MAE_coherence),
-    RMSE_coherence = sqrt(mean(RMSE_coherence^2))  # correct aggregation for RMSE
+    RMSE_coherence = sqrt(mean(RMSE_coherence^2))
   )
 
 print(accuracy)
 print(coherence_overall)
-
