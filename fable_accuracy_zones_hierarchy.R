@@ -87,10 +87,24 @@ series_label <- function(state_col, zone_col) {
   )
 }
 
+# ── Helper for Multivariate Energy Score via Simulation ────────────────────────
+compute_energy_score_row <- function(means, sds, actuals, n_sim = 500) {
+  n_dims <- length(means)
+  # Draw each dimension separately, then bind into n_sim × n_dims matrix
+  sim_samples <- vapply(
+    seq_len(n_dims),
+    function(i) rnorm(n_sim, mean = means[i], sd = sds[i]),
+    numeric(n_sim)
+  )
+  # sim_samples is now n_sim × n_dims — correct layout for es_sample
+  scoringRules::es_sample(y = actuals, dat = t(sim_samples))
+}
 # ── Rolling window loop ────────────────────────────────────────────────────────
 
-all_base_results <- vector("list", length(origins))
-all_mint_results <- vector("list", length(origins))
+all_base_results  <- vector("list", length(origins))
+all_mint_results  <- vector("list", length(origins))
+all_base_es_list  <- vector("list", length(origins))
+all_mint_es_list  <- vector("list", length(origins))
 
 for (idx in seq_along(origins)) {
   
@@ -99,8 +113,6 @@ for (idx in seq_along(origins)) {
   test_dates  <- tourism$Date[(origin + 1):(origin + horizon)]
   
   # ── Build two-level hierarchical tsibble ────────────────────────────────────
-  # zone is nested within state
-  
   tourism_hts <- tourism %>%
     as_tibble() %>%
     select(Date, all_of(zone_codes)) %>%
@@ -112,7 +124,6 @@ for (idx in seq_along(origins)) {
   train_hts <- tourism_hts %>% filter(Date %in% train_dates)
   
   # ── Actuals ────────────────────────────────────────────────────────────────
-  
   actuals_df <- tourism_hts %>%
     filter(Date %in% test_dates) %>%
     as_tibble() %>%
@@ -120,12 +131,9 @@ for (idx in seq_along(origins)) {
     select(series, Date, actual = value)
   
   # ── Fit ────────────────────────────────────────────────────────────────────
-  
-  fit_hts <- train_hts %>%
-    model(ets = ETS(value))
+  fit_hts <- train_hts %>% model(ets = ETS(value))
   
   # ── Base forecasts ──────────────────────────────────────────────────────────
-  
   fc_base_raw <- fit_hts %>% forecast(h = horizon)
   
   fc_base <- fc_base_raw %>%
@@ -154,7 +162,6 @@ for (idx in seq_along(origins)) {
     mutate(origin = origin)
   
   # ── MinT reconciled forecasts ───────────────────────────────────────────────
-  
   fc_mint_raw <- fit_hts %>%
     reconcile(mint = min_trace(ets, method = "mint_shrink")) %>%
     forecast(h = horizon) %>%
@@ -185,12 +192,69 @@ for (idx in seq_along(origins)) {
     ungroup() %>%
     mutate(origin = origin)
   
+  # ── Joint Multivariate Energy Score Pipeline (ADDED) ────────────────────────
+  # Calculate joint metric step by step across each predictive step horizon (1 to 12)
+  # ── Joint Multivariate Energy Score Pipeline (NO-JOIN VERSION) ──────────────
+  base_es_v <- numeric(horizon)
+  mint_es_v <- numeric(horizon)
+  
+  for (h_step in 1:horizon) {
+    target_date <- test_dates[h_step]
+    
+    # 1. Filter the raw fable forecast objects for this specific month step
+    fc_base_slice <- fc_base_raw %>% filter(Date == target_date)
+    fc_mint_slice <- fc_mint_raw %>% filter(Date == target_date)
+    
+    # 2. Extract the forecast distributions directly from the fable objects
+    # This preserves fable's internal ordering perfectly
+    base_means <- fc_base_slice$.mean
+    base_sds   <- sqrt(distributional::variance(fc_base_slice$value))
+    
+    mint_means <- fc_mint_slice$.mean
+    mint_sds   <- sqrt(distributional::variance(fc_mint_slice$value))
+    
+    # 3. Pull actuals directly from tourism_hts matching the exact order of keys
+    # by using the key structures present in the forecast slice
+    actuals_slice <- tourism_hts %>% 
+      filter(Date == target_date) %>%
+      right_join(as_tibble(fc_base_slice) %>% select(state, zone), by = c("state", "zone"))
+    
+    actuals_v <- actuals_slice$value
+    
+    # 4. Final safety guard: If anything dropped out, verify lengths match
+    if (length(actuals_v) == length(base_means)) {
+      base_es_v[h_step] <- compute_energy_score_row(
+        means   = base_means,
+        sds     = base_sds,
+        actuals = actuals_v
+      )
+    } else {
+      base_es_v[h_step] <- NA
+    }
+    
+    if (length(actuals_v) == length(mint_means)) {
+      mint_es_v[h_step] <- compute_energy_score_row(
+        means   = mint_means,
+        sds     = mint_sds,
+        actuals = actuals_v
+      )
+    } else {
+      mint_es_v[h_step] <- NA
+    }
+  }
+  
+  all_base_es_list[[idx]] <- tibble(origin = origin, horizon = 1:horizon, es = base_es_v)
+  all_mint_es_list[[idx]] <- tibble(origin = origin, horizon = 1:horizon, es = mint_es_v)
+  
   all_base_results[[idx]] <- base_acc
   all_mint_results[[idx]] <- mint_acc
 }
 
 all_base_df <- bind_rows(all_base_results)
 all_mint_df <- bind_rows(all_mint_results)
+
+fable_base_es <- bind_rows(all_base_es_list) %>% mutate(level = "Overall")
+fable_mint_es <- bind_rows(all_mint_es_list) %>% mutate(level = "Overall")
 
 # ── Add level classification ───────────────────────────────────────────────────
 
@@ -276,12 +340,11 @@ mint_series_accuracy         <- summarise_by_series(all_mint_df)
 mint_horizon_accuracy        <- summarise_by_horizon(all_mint_df)
 mint_series_horizon_accuracy <- summarise_by_series_and_horizon(all_mint_df)
 
+# Save everything including the explicit multivariate Energy Score frames
 save(base_series_accuracy, base_horizon_accuracy, base_series_horizon_accuracy,
      mint_series_accuracy, mint_horizon_accuracy, mint_series_horizon_accuracy,
-     all_base_df, all_mint_df,
+     all_base_df, all_mint_df, fable_base_es, fable_mint_es,
      file = "fable_zone_hierarchy_121_origins.RData")
 
 print(base_series_accuracy)
 print(mint_series_accuracy)
-print(base_horizon_accuracy)
-print(mint_horizon_accuracy)

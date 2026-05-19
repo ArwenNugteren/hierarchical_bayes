@@ -1,335 +1,167 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# MCB Test: Friedman + Nemenyi post-hoc comparison of forecasting methods
-# Hierarchy: Total → States → Zones
-# Metrics: MAE, RMSE, CRPS, Coverage (distance from 90%)
-# Granularities:
-#   (1) Overall      — one observation per origin (pooled over horizons & series)
-#   (2) By series    — one observation per origin × series
-#   (3) Full         — one observation per origin × horizon × series
-#   Each granularity is also run separately for three hierarchy levels:
-#     (a) All series   (b) Total + States only   (c) Zones only
-# Output: one PDF per metric (3 CD diagrams per granularity), + RData + CSV
+# FIXED MCB Test By Horizon: Correctly unpacking nested RDS structures
 # ══════════════════════════════════════════════════════════════════════════════
 
 library(dplyr)
 library(tidyr)
 library(stringr)
-library(tsutils)     # nemenyi()
+library(tsutils)
 
 # ── 0. Configuration ───────────────────────────────────────────────────────────
 bayesian_runs <- list(
-  "Bayes default" = "accuracy_zones",
+  "Bayes default"        = "accuracy_zones",
   "Bayes total_lambda=2" = "accuracy_zones_top_lambda2",
   "Bayes state_lambda=2" = "accuracy_zones_state_lambda2"
 )
 
-# Path to fable RData file for the zone hierarchy.
-# Must contain: all_base_df and all_mint_df with columns:
-#   origin, horizon, series, actual, forecast, abs_error, sq_error, crps, covered
 fable_rdata_path <- "fable_zone_hierarchy_121_origins.RData"
+output_dir       <- "mcb_results_zones_by_horizon"
+dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
-# Output directory
-output_dir <- "mcb_results_zones"
-dir.create(output_dir, showWarnings = FALSE)
+horizon_max <- 12L
 
-
-# ── 1. Load Bayesian results ───────────────────────────────────────────────────
-
-load_bayesian <- function(folder, method_name) {
-  files <- list.files(folder,
-                      pattern    = "^accuracy_timestep_[0-9]+\\.rds$",
-                      full.names = TRUE)
-  if (length(files) == 0)
-    stop(sprintf("No accuracy_timestep_*.rds files found in '%s'", folder))
+# ── 1. Load Bayesian Results (FIXED UNPACKING) ─────────────────────────────────
+load_bayesian_data <- function(folder, method_name) {
+  files <- list.files(folder, pattern = "^accuracy_timestep_[0-9]+\\.rds$", full.names = TRUE)
+  if (length(files) == 0) stop(sprintf("No files found in '%s'", folder))
   
-  bind_rows(lapply(files, readRDS)) %>%
-    mutate(method = method_name)
+  uni_list   <- list()
+  multi_list <- list()
+  
+  for (i in seq_along(files)) {
+    obj <- readRDS(files[i])
+    
+    # Explicitly pull from the nested univariate data frame
+    if ("univariate" %in% names(obj)) {
+      uni_list[[i]] <- obj$univariate %>%
+        transmute(
+          origin, horizon, series, actual, fc_mean, ae, se,
+          level = case_when(
+            level == "Total" ~ "Total",
+            level == "State" ~ "State",
+            level == "Zone"  ~ "Zone",
+            TRUE             ~ level
+          ),
+          method = method_name
+        )
+    }
+    
+    # Explicitly pull from the nested multivariate data frame
+    if ("multivariate" %in% names(obj)) {
+      multi_list[[i]] <- obj$multivariate %>%
+        transmute(origin, horizon, es, level = "Overall", method = method_name)
+    }
+  }
+  
+  list(uni = bind_rows(uni_list), multi = bind_rows(multi_list))
 }
 
-bayes_list <- mapply(load_bayesian,
-                     folder      = bayesian_runs,
-                     method_name = names(bayesian_runs),
-                     SIMPLIFY    = FALSE)
+bayes_raw <- mapply(load_bayesian_data, 
+                    folder = bayesian_runs, 
+                    method_name = names(bayesian_runs), 
+                    SIMPLIFY = FALSE)
 
-bayes_df <- bind_rows(bayes_list)
-# Expected columns: origin, horizon, series, actual, fc_mean,
-#                   ae, se, crps, covered, method
+bayes_uni   <- bind_rows(lapply(bayes_raw, `[[`, "uni"))
+bayes_multi <- bind_rows(lapply(bayes_raw, `[[`, "multi"))
 
+# ── 2. Load Fable Results ──────────────────────────────────────────────────────
+load(fable_rdata_path) 
 
-# ── 2. Load fable results ──────────────────────────────────────────────────────
-
-load(fable_rdata_path)   # loads all_base_df and all_mint_df
-
-prep_fable <- function(df, method_name) {
+prep_fable_uni <- function(df, method_name) {
   df %>%
     transmute(
-      origin  = origin,
-      horizon = horizon,
-      series  = series,
-      actual  = actual,
-      fc_mean = forecast,
-      ae      = abs_error,
-      se      = sq_error,
-      crps    = crps,
-      covered = covered,
-      method  = method_name
+      origin, horizon, series, actual, fc_mean = forecast,
+      ae = abs_error, se = sq_error,
+      level = case_when(
+        series == "Total"             ~ "Total",
+        str_detect(series, "^[A-G]$")   ~ "State",
+        str_detect(series, "^[A-G][A-Z]$") ~ "Zone",
+        TRUE                          ~ "Other"
+      ),
+      method = method_name
     )
 }
 
-fable_base_df <- prep_fable(all_base_df, "ETS (base)")
-fable_mint_df <- prep_fable(all_mint_df, "ETS (MinT)")
-
-
-# ── 3. Combine all methods ─────────────────────────────────────────────────────
-
-all_df <- bind_rows(bayes_df, fable_base_df, fable_mint_df) %>%
-  mutate(
-    cov_dist = abs(covered - 0.90),
-    # Classify each series by hierarchy level
-    level = case_when(
-      series == "Total"                          ~ "Total/State",
-      str_detect(series, "^[A-G]$")             ~ "Total/State",
-      str_detect(series, "^[A-G][A-Z]$")        ~ "Zone",
-      TRUE                                       ~ "Other"
-    )
-  )
-
-methods <- unique(all_df$method)
-cat("Methods found:\n")
-print(methods)
-
-cat("\nSeries levels found:\n")
-print(table(all_df$level))
-
-
-# ── 4. Helper: build wide matrix for nemenyi() ────────────────────────────────
-
-build_rank_matrix <- function(long_df, metric_col) {
-  long_df %>%
-    select(uid, method, value = all_of(metric_col)) %>%
-    pivot_wider(names_from = method, values_from = value) %>%
-    arrange(uid) %>%
-    select(-uid) %>%
-    as.matrix()
-}
-
-
-# ── 5. Build aggregated data frames at each granularity ───────────────────────
-# Each function accepts a (possibly pre-filtered) all_df subset.
-
-make_overall_df <- function(df) {
-  df %>%
-    group_by(origin, method) %>%
-    summarise(
-      MAE     = mean(ae,       na.rm = TRUE),
-      RMSE    = sqrt(mean(se,  na.rm = TRUE)),
-      CRPS    = mean(crps,     na.rm = TRUE),
-      CovDist = mean(cov_dist, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    mutate(uid = as.character(origin))
-}
-
-make_series_df <- function(df) {
-  df %>%
-    group_by(origin, series, method) %>%
-    summarise(
-      MAE     = mean(ae,       na.rm = TRUE),
-      RMSE    = sqrt(mean(se,  na.rm = TRUE)),
-      CRPS    = mean(crps,     na.rm = TRUE),
-      CovDist = mean(cov_dist, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    mutate(uid = paste(origin, series, sep = "_"))
-}
-
-make_full_df <- function(df) {
-  df %>%
-    mutate(
-      MAE     = ae,
-      RMSE    = sqrt(se),
-      CRPS    = crps,
-      CovDist = cov_dist,
-      uid     = paste(origin, horizon, series, sep = "_")
-    )
-}
-
-
-# ── 6. Define series subsets ───────────────────────────────────────────────────
-# "all"          — every series
-# "total_state"  — Total + state-level only  (level == "Total/State")
-# "zone"         — zone-level only           (level == "Zone")
-
-series_subsets <- list(
-  list(label = "All series",         filter_expr = quote(level %in% c("Total/State", "Zone"))),
-  list(label = "Total & states only",filter_expr = quote(level == "Total/State")),
-  list(label = "Zones only",         filter_expr = quote(level == "Zone"))
+fable_uni <- bind_rows(
+  prep_fable_uni(all_base_df, "ETS (base)"),
+  prep_fable_uni(all_mint_df, "ETS (MinT)")
 )
 
-
-# ── 7. Run MCB (Friedman + Nemenyi) ───────────────────────────────────────────
-
-run_mcb <- function(long_df, metric_col, granularity_label) {
+# ── 3. Core Plotting Engine ────────────────────────────────────────────────────
+plot_mcb_panel <- function(wide_df, title) {
+  mat <- wide_df %>% select(-uid) %>% as.matrix()
+  mat <- mat[complete.cases(mat), , drop = FALSE]
   
-  mat <- build_rank_matrix(long_df, metric_col)
-  
-  complete_rows <- complete.cases(mat)
-  n_dropped <- nrow(mat) - sum(complete_rows)
-  if (n_dropped > 0) {
-    warning(sprintf(
-      "[%s / %s] Dropping %d incomplete rows (missing method values).",
-      granularity_label, metric_col, n_dropped
-    ))
-    mat <- mat[complete_rows, , drop = FALSE]
+  if (nrow(mat) >= 3 && ncol(mat) >= 2) {
+    tsutils::nemenyi(mat, conf.level = 0.95, plottype = "vmcb", main = title)
+  } else {
+    plot.new()
+    text(0.5, 0.5, "Insufficient Data\nor Single Method", cex = 0.8, col = "grey50")
+    title(main = title)
   }
-  
-  if (nrow(mat) < 3) {
-    warning(sprintf("[%s / %s] Too few observations (%d) — skipping.",
-                    granularity_label, metric_col, nrow(mat)))
-    return(NULL)
-  }
-  
-  result <- tryCatch(
-    tsutils::nemenyi(mat, conf.level = 0.95, plottype = "none"),
-    error = function(e) {
-      warning(sprintf("[%s / %s] nemenyi() failed: %s",
-                      granularity_label, metric_col, conditionMessage(e)))
-      NULL
-    }
-  )
-  
-  result
 }
 
+# ── 4. Run Pipelines for Univariate Metrics (MAE & RMSE) ──────────────────────
+uni_metrics <- c("MAE", "RMSE")
 
-# ── 8. Main loop: metric → series subset → granularity ────────────────────────
-
-metrics       <- c("MAE", "RMSE", "CRPS", "CovDist")
-metric_labels <- c(
-  MAE     = "MAE",
-  RMSE    = "RMSE",
-  CRPS    = "CRPS",
-  CovDist = "Coverage distance from 90%"
-)
-
-granularity_makers <- list(
-  list(label = "Overall (pooled horizons & series)", fn = make_overall_df),
-  list(label = "By series (pooled horizons)",        fn = make_series_df),
-  list(label = "Full (origin × horizon × series)",   fn = make_full_df)
-)
-
-# Storage
-all_mcb_results <- list()
-summary_tables  <- list()
-
-for (metric in metrics) {
+for (metric in uni_metrics) {
+  pdf_path <- file.path(output_dir, sprintf("MCB_%s.pdf", metric))
+  pdf(pdf_path, width = 16, height = 4.5)
   
-  # One PDF per metric; rows = series subsets, cols = granularities
-  n_rows <- length(series_subsets)
-  n_cols <- length(granularity_makers)
-  
-  pdf_path <- file.path(output_dir, sprintf("CD_%s.pdf", metric))
-  pdf(pdf_path, width = 5 * n_cols, height = 5 * n_rows)
-  par(mfrow = c(n_rows, n_cols))
-  
-  for (ss in series_subsets) {
+  for (h in 1:horizon_max) {
+    par(mfrow = c(1, 4), mar = c(3, 4, 4, 1))
     
-    # Filter all_df to this series subset
-    subset_df <- all_df %>% filter(eval(ss$filter_expr))
+    # Combine true un-nested univariate frames
+    h_uni <- filter(bind_rows(bayes_uni, fable_uni), horizon == h)
     
-    for (gran in granularity_makers) {
-      
-      # Build aggregated df for this granularity
-      agg_df <- gran$fn(subset_df)
-      
-      key <- paste(metric, ss$label, gran$label, sep = " | ")
-      cat(sprintf("\n── MCB: %s | %s | %s ──\n", metric, ss$label, gran$label))
-      
-      res <- run_mcb(
-        long_df           = agg_df,
-        metric_col        = metric,
-        granularity_label = paste(ss$label, gran$label, sep = " / ")
-      )
-      
-      all_mcb_results[[key]] <- res
-      
-      plot_title <- sprintf("%s\n%s\n%s",
-                            metric_labels[metric], ss$label, gran$label)
-      
-      if (!is.null(res)) {
-        
-        # Re-build clean matrix for plotting
-        mat_plot <- build_rank_matrix(agg_df, metric)
-        mat_plot <- mat_plot[complete.cases(mat_plot), , drop = FALSE]
-        
-        tsutils::nemenyi(
-          mat_plot,
-          conf.level = 0.95,
-          plottype   = "vmcb",
-          main       = plot_title
-        )
-        
-        # Ranks table
-        mean_ranks <- res$means
-        tbl <- data.frame(
-          metric       = metric,
-          series_scope = ss$label,
-          granularity  = gran$label,
-          method       = names(mean_ranks),
-          mean_rank    = as.numeric(mean_ranks),
-          stringsAsFactors = FALSE
-        ) %>%
-          arrange(mean_rank)
-        
-        # Pairwise p-values
-        pvals <- res$p.value
-        if (!is.null(pvals)) {
-          pval_long <- as.data.frame(as.table(pvals)) %>%
-            setNames(c("method_1", "method_2", "p_value")) %>%
-            mutate(
-              metric       = metric,
-              series_scope = ss$label,
-              granularity  = gran$label
-            ) %>%
-            filter(!is.na(p_value))
-        } else {
-          pval_long <- NULL
-        }
-        
-        summary_tables[[key]] <- list(ranks = tbl, pvalues = pval_long)
-        
-        cat("  Average ranks:\n");  print(tbl)
-        if (!is.null(pval_long)) { cat("  Pairwise p-values:\n"); print(pval_long) }
-        
-      } else {
-        plot.new()
-        title(main = paste0(plot_title, "\n[FAILED]"))
-      }
-    }
+    # 1. Overall
+    wide_overall <- h_uni %>% group_by(origin, method) %>%
+      summarise(val = if(metric == "MAE") mean(ae) else sqrt(mean(se)), .groups = "drop") %>%
+      mutate(uid = as.character(origin)) %>% pivot_wider(names_from = method, values_from = val)
+    
+    # 2. Total
+    wide_total <- h_uni %>% filter(level == "Total") %>% group_by(origin, method) %>%
+      summarise(val = if(metric == "MAE") mean(ae) else sqrt(mean(se)), .groups = "drop") %>%
+      mutate(uid = as.character(origin)) %>% pivot_wider(names_from = method, values_from = val)
+    
+    # 3. State
+    wide_state <- h_uni %>% filter(level == "State") %>% group_by(origin, method) %>%
+      summarise(val = if(metric == "MAE") mean(ae) else sqrt(mean(se)), .groups = "drop") %>%
+      mutate(uid = as.character(origin)) %>% pivot_wider(names_from = method, values_from = val)
+    
+    # 4. Zone
+    wide_zone <- h_uni %>% filter(level == "Zone") %>% group_by(origin, method) %>%
+      summarise(val = if(metric == "MAE") mean(ae) else sqrt(mean(se)), .groups = "drop") %>%
+      mutate(uid = as.character(origin)) %>% pivot_wider(names_from = method, values_from = val)
+    
+    plot_mcb_panel(wide_overall, sprintf("%s - H %d\nOverall System", metric, h))
+    plot_mcb_panel(wide_total,   sprintf("%s - H %d\nTotal Level", metric, h))
+    plot_mcb_panel(wide_state,   sprintf("%s - H %d\nStates", metric, h))
+    plot_mcb_panel(wide_zone,    sprintf("%s - H %d\nZones", metric, h))
   }
-  
   dev.off()
-  cat(sprintf("\nSaved: %s\n", pdf_path))
 }
 
+# ── 5. Run Pipeline for Energy Score (ES) ──────────────────────────────────────
+pdf_path_es <- file.path(output_dir, "MCB_ES.pdf")
+pdf(pdf_path_es, width = 6, height = 5)
 
-# ── 9. Save CSV summaries ──────────────────────────────────────────────────────
-
-all_ranks <- bind_rows(lapply(summary_tables, function(x) x$ranks))
-all_pvals <- bind_rows(lapply(summary_tables, function(x) x$pvalues))
-
-write.csv(all_ranks, file.path(output_dir, "mcb_mean_ranks.csv"),    row.names = FALSE)
-write.csv(all_pvals, file.path(output_dir, "mcb_pairwise_pvals.csv"), row.names = FALSE)
-
-cat("\nSaved CSVs:\n")
-cat(" ", file.path(output_dir, "mcb_mean_ranks.csv"), "\n")
-cat(" ", file.path(output_dir, "mcb_pairwise_pvals.csv"), "\n")
-
-
-# ── 10. Save full results as RData ─────────────────────────────────────────────
-
-save(all_mcb_results, all_ranks, all_pvals, all_df,
-     file = file.path(output_dir, "mcb_results_zones.RData"))
-
-cat("\nSaved RData:", file.path(output_dir, "mcb_results_zones.RData"), "\n")
-cat("\nDone.\n")
+for (h in 1:horizon_max) {
+  par(mfrow = c(1, 1), mar = c(4, 4, 4, 1))
+  h_multi <- filter(bayes_multi, horizon == h)
+  
+  if (nrow(h_multi) > 0) {
+    wide_es <- h_multi %>%
+      group_by(origin, method) %>%
+      summarise(val = mean(es), .groups = "drop") %>%
+      mutate(uid = as.character(origin)) %>%
+      pivot_wider(names_from = method, values_from = val)
+    
+    # Note: Fable won't show up here unless you generate sample paths from Fable
+    plot_mcb_panel(wide_es, sprintf("Energy Score - Horizon %d\n(Bayesian Joint Comparison)", h))
+  } else {
+    plot.new()
+    title(main = sprintf("ES - Horizon %d [No Data]", h))
+  }
+}
+dev.off()
