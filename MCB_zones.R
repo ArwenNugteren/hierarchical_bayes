@@ -9,9 +9,12 @@ library(tsutils)
 
 # ── 0. Configuration ───────────────────────────────────────────────────────────
 bayesian_runs <- list(
-  "Bayes default"        = "accuracy_zones",
-  "Bayes total_lambda=2" = "accuracy_zones_top_lambda2",
-  "Bayes state_lambda=2" = "accuracy_zones_state_lambda2"
+  "Bayes independent" = "accuracy_zones_independent",
+  "Bayes independent coherent" = "accuracy_zones_independent_coherency",
+  "Bayes hierarchy"        = "accuracy_zones_base",
+  "Bayes coherent" = "accuracy_zones_coherency",
+  "Bayes top-level weighted" = "accuracy_zones_coherency_lambdatop7", 
+  "Bayes state-level weighted" = "accuracy_zones_coherency_lambdastatescaled"
 )
 
 fable_rdata_path <- "fable_zone_hierarchy_121_origins.RData"
@@ -87,9 +90,16 @@ fable_uni <- bind_rows(
   prep_fable_uni(all_mint_df, "ETS (MinT)")
 )
 
+fable_es <- bind_rows(
+  fable_base_es %>% mutate(method = "ETS (base)"),
+  fable_mint_es %>% mutate(method = "ETS (MinT)")
+)
+
 # ── 3. Core Plotting Engine ────────────────────────────────────────────────────
 plot_mcb_panel <- function(wide_df, title) {
-  mat <- wide_df %>% select(-uid) %>% as.matrix()
+  mat <- wide_df %>% 
+    select(-uid, -origin) %>%    # drop both uid and origin
+    as.matrix()
   mat <- mat[complete.cases(mat), , drop = FALSE]
   
   if (nrow(mat) >= 3 && ncol(mat) >= 2) {
@@ -148,7 +158,10 @@ pdf(pdf_path_es, width = 6, height = 5)
 
 for (h in 1:horizon_max) {
   par(mfrow = c(1, 1), mar = c(4, 4, 4, 1))
-  h_multi <- filter(bayes_multi, horizon == h)
+  h_multi <- bind_rows(
+    filter(bayes_multi, horizon == h),
+    filter(fable_es,    horizon == h)
+  )
   
   if (nrow(h_multi) > 0) {
     wide_es <- h_multi %>%
