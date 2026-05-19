@@ -6,9 +6,9 @@ library(kldest)
 
 # ── User-set paths and parameters ──────────────────────────────────────────────
 
-dir_stanfits    <- "tourism_job_21345282/stanfits" 
-dir_accuracy    <- "tourism_job_21345282/accuracy"    
-dir_plots       <- "tourism_job_21345282/accuracy/plots" 
+dir_stanfits    <- "tourism_job_21332508/stanfits" 
+dir_accuracy    <- "tourism_job_21332508/accuracy"    
+dir_plots       <- "tourism_job_21332508/accuracy/plots" 
 
 n_es_subsample <- 1000L                       # draws used for ES pairwise term
 
@@ -157,9 +157,14 @@ for (f in stanfit_files) {
     # q = sum-of-states forecast distribution (approximating distribution)
     # direction: KL(total || sum_states)
     kl_val <- tryCatch({
+      # kldest::kld_est_nn(
+      #   matrix(draws_t,          ncol = 1),   # p: total draws
+      #   matrix(sum_states_draws, ncol = 1)    # q: sum-of-states draws
+      # )
+      # trying the other way around, treating P as H0, Q as H1
       kldest::kld_est_nn(
-        matrix(draws_t,          ncol = 1),   # p: total draws
-        matrix(sum_states_draws, ncol = 1)    # q: sum-of-states draws
+        matrix(sum_states_draws, ncol = 1),    # p: sum-of-states draws
+        matrix(draws_t,          ncol = 1)   # q: total draws
       )
     }, error = function(e) NA_real_)
     
