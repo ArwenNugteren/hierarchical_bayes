@@ -4,7 +4,7 @@ library(patchwork)
 
 # ── User-set paths ─────────────────────────────────────────────────────────────
 
-dir_accuracy <- file.path("accuracy_purpose_hierarchy")
+dir_accuracy <- file.path("accuracy_purposes_hierarchy_coherency0.002_totalweight_nrp")
 dir_plots    <- file.path(dir_accuracy, "plots")
 
 dir.create(dir_plots, recursive = TRUE, showWarnings = FALSE)

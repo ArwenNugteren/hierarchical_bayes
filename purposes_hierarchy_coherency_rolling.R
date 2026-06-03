@@ -96,7 +96,7 @@ lambda_total <- 1
 lambda_pp    <- 1
 lambda_sp    <- 1
 lambda_zp    <- 1
-sigma_coh    <- 0.01 * n_rp
+sigma_coh    <- 0.001 * n_rp
 
 # ── Stan model ─────────────────────────────────────────────────────────────────
 
