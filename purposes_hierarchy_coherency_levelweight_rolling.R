@@ -555,17 +555,21 @@ stanFit <- sampling(
 saveRDS(stanFit, file.path(dir_stanfits, sprintf("stanfit_timestep_%03d.rds", origin)))
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-compute_energy_score <- function(draws_mat, actuals, sub_idx = NULL) {
-  if (!is.null(sub_idx)) draws_mat <- draws_mat[sub_idx, , drop = FALSE]
-  col_sds    <- apply(draws_mat, 2, sd)
-  draws_sc   <- sweep(draws_mat, 2, col_sds, "/")
-  actuals_sc <- as.numeric(actuals) / col_sds
-  diffs1     <- sweep(draws_sc, 2, actuals_sc, "-")
-  t1         <- mean(sqrt(rowSums(diffs1^2)))
-  pw         <- dist(draws_sc, method = "euclidean")
-  t2         <- mean(pw)
-  t1 - 0.5 * t2
+compute_energy_score <- function(draws_mat, actuals, n_subsample = NULL) {
+  n_draws <- nrow(draws_mat)
+  if (!is.null(n_subsample) && n_subsample < n_draws) {
+    idx1 <- sample.int(n_draws, size = n_subsample, replace = FALSE)
+    idx2 <- sample.int(n_draws, size = n_subsample, replace = FALSE)
+    x    <- draws_mat[idx1, , drop = FALSE]
+    xs   <- draws_mat[idx2, , drop = FALSE]
+  } else {
+    x    <- draws_mat
+    xs   <- draws_mat[sample.int(n_draws), , drop = FALSE] # Crucial Fix: shuffle rows
+  }
+  diffs <- sweep(x, 2, as.numeric(actuals), "-")
+  t1    <- mean(sqrt(rowSums(diffs^2)))
+  t2    <- mean(sqrt(rowSums((x - xs)^2)))
+  return(t1 - 0.5 * t2)
 }
 
 JSD_metric <- function(p_draws, q_draws, n_grid = 1000) {
@@ -575,38 +579,79 @@ JSD_metric <- function(p_draws, q_draws, n_grid = 1000) {
   q_kde <- pmax(density(q_draws, from = lo, to = hi, n = n_grid)$y, 1e-300)
   m_kde <- 0.5 * (p_kde + q_kde)
   dx    <- (hi - lo) / (n_grid - 1)
-  jsd   <- 0.5 * (sum(p_kde * log(p_kde / m_kde)) +
-                    sum(q_kde * log(q_kde / m_kde))) * dx
+  jsd   <- 0.5 * (sum(p_kde * log(p_kde / m_kde)) + sum(q_kde * log(q_kde / m_kde))) * dx
   sqrt(max(0, min(log(2), jsd)))
 }
 
-# ── Extract draws ──────────────────────────────────────────────────────────────
+# ── Single-pass extraction ─────────────────────────────────────────────────────
 
-fc_rp_draws    <- rstan::extract(stanFit, pars = "Y_fc_rp")$Y_fc_rp
-fc_zp_draws    <- rstan::extract(stanFit, pars = "Y_fc_zp")$Y_fc_zp
-fc_sp_draws    <- rstan::extract(stanFit, pars = "Y_fc_sp")$Y_fc_sp
-fc_pp_draws    <- rstan::extract(stanFit, pars = "Y_fc_pp")$Y_fc_pp
-fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
+all_pars <- rstan::extract(stanFit, pars = c(
+  "Y_fc_rp", "Y_fc_zp", "Y_fc_sp", "Y_fc_pp", "Y_fc_total",
+  "fitted_rp", "fitted_zp", "fitted_sp", "fitted_pp", "fitted_total"
+))
+
+fc_rp_draws    <- all_pars$Y_fc_rp
+fc_zp_draws    <- all_pars$Y_fc_zp
+fc_sp_draws    <- all_pars$Y_fc_sp
+fc_pp_draws    <- all_pars$Y_fc_pp
+fc_total_draws <- all_pars$Y_fc_total
 
 n_draws <- nrow(fc_rp_draws)
 
 # ── Back-transform to original scale ──────────────────────────────────────────
 
-fc_rp_orig <- fc_rp_draws[, 1:horizon, , drop = FALSE] * Y_sd + Y_mean
+fc_rp_orig    <- fc_rp_draws[, 1:horizon, , drop = FALSE] * Y_sd + Y_mean
+fc_total_orig <- fc_total_draws[, 1:horizon, drop = FALSE] * Y_sd + Y_mean * n_rp
 
 fc_zp_orig <- array(NA_real_, dim = c(n_draws, horizon, n_zp))
-for (z in 1:n_zp)
+for (z in seq_len(n_zp))
   fc_zp_orig[, , z] <- fc_zp_draws[, 1:horizon, z] * Y_sd + Y_mean * rp_per_zp[z]
 
 fc_sp_orig <- array(NA_real_, dim = c(n_draws, horizon, n_sp))
-for (s in 1:n_sp)
+for (s in seq_len(n_sp))
   fc_sp_orig[, , s] <- fc_sp_draws[, 1:horizon, s] * Y_sd + Y_mean * rp_per_sp[s]
 
 fc_pp_orig <- array(NA_real_, dim = c(n_draws, horizon, n_pp))
-for (p in 1:n_pp)
+for (p in seq_len(n_pp))
   fc_pp_orig[, , p] <- fc_pp_draws[, 1:horizon, p] * Y_sd + Y_mean * rp_per_pp[p]
 
-fc_total_orig <- fc_total_draws[, 1:horizon, drop = FALSE] * Y_sd + Y_mean * n_rp
+rm(fc_rp_draws, fc_zp_draws, fc_sp_draws, fc_pp_draws, fc_total_draws)
+
+# ── Build posterior-mean residuals for MinT W matrix ──────────────────────────
+
+pm_fitted_rp    <- apply(all_pars$fitted_rp,    2:3, mean)
+pm_fitted_zp    <- apply(all_pars$fitted_zp,    2:3, mean)
+pm_fitted_sp    <- apply(all_pars$fitted_sp,    2:3, mean)
+pm_fitted_pp    <- apply(all_pars$fitted_pp,    2:3, mean)
+pm_fitted_total <- apply(all_pars$fitted_total, 2,   mean)
+
+rm(all_pars)
+
+fit_rp_orig    <- pm_fitted_rp    * Y_sd + Y_mean
+fit_total_orig <- pm_fitted_total * Y_sd + Y_mean * n_rp
+
+fit_zp_orig <- pm_fitted_zp
+for (z in seq_len(n_zp))
+  fit_zp_orig[, z] <- pm_fitted_zp[, z] * Y_sd + Y_mean * rp_per_zp[z]
+
+fit_sp_orig <- pm_fitted_sp
+for (s in seq_len(n_sp))
+  fit_sp_orig[, s] <- pm_fitted_sp[, s] * Y_sd + Y_mean * rp_per_sp[s]
+
+fit_pp_orig <- pm_fitted_pp
+for (p in seq_len(n_pp))
+  fit_pp_orig[, p] <- pm_fitted_pp[, p] * Y_sd + Y_mean * rp_per_pp[p]
+
+E <- cbind(
+  Y_raw_total[train_idx] - fit_total_orig,
+  Y_raw_pp[train_idx, ]  - fit_pp_orig,
+  Y_raw_sp[train_idx, ]  - fit_sp_orig,
+  Y_raw_zp[train_idx, ]  - fit_zp_orig,
+  Y_raw_rp[train_idx, ]  - fit_rp_orig
+)
+
+rm(pm_fitted_rp, pm_fitted_zp, pm_fitted_sp, pm_fitted_pp, pm_fitted_total,
+   fit_rp_orig, fit_zp_orig, fit_sp_orig, fit_pp_orig, fit_total_orig)
 
 # ── Actuals ────────────────────────────────────────────────────────────────────
 
@@ -616,111 +661,116 @@ actuals_sp    <- Y_raw_sp[test_idx, ]
 actuals_pp    <- Y_raw_pp[test_idx, ]
 actuals_total <- Y_raw_total[test_idx]
 
-# ── Subsample index for ES ─────────────────────────────────────────────────────
+# ── Accuracy helper (shared by base and MinT) ──────────────────────────────────
 
 n_es_subsample <- 1000L
 set.seed(origin)
-sub_idx <- sample.int(n_draws, size = min(n_es_subsample, n_draws), replace = FALSE)
 
-# ── Per-horizon loop ───────────────────────────────────────────────────────────
-
-horizon_results <- lapply(1:horizon, function(h) {
+make_accuracy <- function(fc_rp_arr, fc_zp_arr, fc_sp_arr, fc_pp_arr,
+                          fc_total_mat, label_origin) {
   
   make_rows <- function(draws_arr, actuals_mat, codes, level) {
     lapply(seq_len(ncol(actuals_mat)), function(i) {
-      draws  <- draws_arr[, h, i]
-      actual <- actuals_mat[h, i]
-      data.frame(
-        origin     = origin,
-        horizon    = h,
-        series     = codes[i],
-        level      = level,
-        actual     = actual,
-        fc_mean    = mean(draws),
-        ae         = abs(mean(draws) - actual),
-        se         = (mean(draws) - actual)^2,
-        crps       = scoringRules::crps_sample(actual, draws),
-        logS       = scoringRules::logs_sample(actual, draws),
-        covered_90 = as.integer(actual >= quantile(draws, 0.05)  &
-                                  actual <= quantile(draws, 0.95)),
-        covered_95 = as.integer(actual >= quantile(draws, 0.025) &
-                                  actual <= quantile(draws, 0.975)),
-        pit        = mean(draws < actual)
-      )
+      lapply(seq_len(horizon), function(h) {
+        draws  <- draws_arr[, h, i]
+        actual <- actuals_mat[h, i]
+        data.frame(
+          origin     = label_origin,
+          horizon    = h,
+          series     = codes[i],
+          level      = level,
+          actual     = actual,
+          fc_mean    = mean(draws),
+          ae         = abs(mean(draws) - actual),
+          se         = (mean(draws) - actual)^2,
+          crps       = scoringRules::crps_sample(actual, draws),
+          logS       = scoringRules::logs_sample(actual, draws),
+          covered_90 = as.integer(actual >= quantile(draws, 0.05)  &
+                                    actual <= quantile(draws, 0.95)),
+          covered_95 = as.integer(actual >= quantile(draws, 0.025) &
+                                    actual <= quantile(draws, 0.975)),
+          pit        = mean(draws < actual)
+        )
+      })
     })
   }
   
-  draws_t  <- fc_total_orig[, h]
-  actual_t <- actuals_total[h]
-  total_row <- data.frame(
-    origin     = origin,
-    horizon    = h,
-    series     = "Total",
-    level      = "Total",
-    actual     = actual_t,
-    fc_mean    = mean(draws_t),
-    ae         = abs(mean(draws_t) - actual_t),
-    se         = (mean(draws_t) - actual_t)^2,
-    crps       = scoringRules::crps_sample(actual_t, draws_t),
-    logS       = scoringRules::logs_sample(actual_t, draws_t),
-    covered_90 = as.integer(actual_t >= quantile(draws_t, 0.05)  &
-                              actual_t <= quantile(draws_t, 0.95)),
-    covered_95 = as.integer(actual_t >= quantile(draws_t, 0.025) &
-                              actual_t <= quantile(draws_t, 0.975)),
-    pit        = mean(draws_t < actual_t)
-  )
+  total_rows <- lapply(seq_len(horizon), function(h) {
+    draws  <- fc_total_mat[, h]
+    actual <- actuals_total[h]
+    data.frame(
+      origin     = label_origin,
+      horizon    = h,
+      series     = "Total",
+      level      = "Total",
+      actual     = actual,
+      fc_mean    = mean(draws),
+      ae         = abs(mean(draws) - actual),
+      se         = (mean(draws) - actual)^2,
+      crps       = scoringRules::crps_sample(actual, draws),
+      logS       = scoringRules::logs_sample(actual, draws),
+      covered_90 = as.integer(actual >= quantile(draws, 0.05)  &
+                                actual <= quantile(draws, 0.95)),
+      covered_95 = as.integer(actual >= quantile(draws, 0.025) &
+                                actual <= quantile(draws, 0.975)),
+      pit        = mean(draws < actual)
+    )
+  })
   
   univariate_df <- bind_rows(c(
-    make_rows(fc_rp_orig, actuals_rp, rp_codes, "RegionPurpose"),
-    make_rows(fc_zp_orig, actuals_zp, zp_codes, "ZonePurpose"),
-    make_rows(fc_sp_orig, actuals_sp, sp_codes, "StatePurpose"),
-    make_rows(fc_pp_orig, actuals_pp, pp_codes, "Purpose"),
-    list(total_row)
+    unlist(make_rows(fc_rp_arr, actuals_rp, rp_codes, "RegionPurpose"), recursive = FALSE),
+    unlist(make_rows(fc_zp_arr, actuals_zp, zp_codes, "ZonePurpose"),   recursive = FALSE),
+    unlist(make_rows(fc_sp_arr, actuals_sp, sp_codes, "StatePurpose"),  recursive = FALSE),
+    unlist(make_rows(fc_pp_arr, actuals_pp, pp_codes, "Purpose"),       recursive = FALSE),
+    total_rows
   ))
   
-  rp_mat <- fc_rp_orig[, h, ]
-  zp_mat <- fc_zp_orig[, h, ]
-  sp_mat <- fc_sp_orig[, h, ]
-  pp_mat <- fc_pp_orig[, h, ]
-  
-  sum_rp_draws <- rowSums(rp_mat)
-  sum_zp_draws <- rowSums(zp_mat)
-  sum_sp_draws <- rowSums(sp_mat)
-  sum_pp_draws <- rowSums(pp_mat)
-  
-  joint_mat     <- cbind(rp_mat, zp_mat, sp_mat, pp_mat, draws_t)
-  actuals_joint <- c(actuals_rp[h, ], actuals_zp[h, ],
-                     actuals_sp[h, ], actuals_pp[h, ], actual_t)
-  es_val <- compute_energy_score(joint_mat, actuals_joint, sub_idx)
-  
-  multivariate_df <- data.frame(
-    origin           = origin,
-    horizon          = h,
-    es               = es_val,
-    mai_rp_zp        = mean(sum_rp_draws) - mean(sum_zp_draws),
-    mai_zp_sp        = mean(sum_zp_draws) - mean(sum_sp_draws),
-    mai_sp_pp        = mean(sum_sp_draws) - mean(sum_pp_draws),
-    mai_pp_total     = mean(sum_pp_draws) - mean(draws_t),
-    mai_rp_total     = mean(sum_rp_draws) - mean(draws_t),
-    jsd_rp_zp        = JSD_metric(sum_rp_draws, sum_zp_draws),
-    jsd_zp_sp        = JSD_metric(sum_zp_draws, sum_sp_draws),
-    jsd_sp_pp        = JSD_metric(sum_sp_draws, sum_pp_draws),
-    jsd_pp_total     = JSD_metric(sum_pp_draws, draws_t),
-    jsd_rp_total     = JSD_metric(sum_rp_draws, draws_t)
-  )
+  multivariate_df <- bind_rows(lapply(seq_len(horizon), function(h) {
+    rp_mat  <- fc_rp_arr[, h, ]
+    zp_mat  <- fc_zp_arr[, h, ]
+    sp_mat  <- fc_sp_arr[, h, ]
+    pp_mat  <- fc_pp_arr[, h, ]
+    draws_t <- fc_total_mat[, h]
+    
+    sum_rp <- rowSums(rp_mat)
+    sum_zp <- rowSums(zp_mat)
+    sum_sp <- rowSums(sp_mat)
+    sum_pp <- rowSums(pp_mat)
+    
+    # Joint vector order matches original: rp | zp | sp | pp | total
+    joint_mat     <- cbind(rp_mat, zp_mat, sp_mat, pp_mat, draws_t)
+    actuals_joint <- c(actuals_rp[h, ], actuals_zp[h, ],
+                       actuals_sp[h, ], actuals_pp[h, ], actuals_total[h])
+    
+    data.frame(
+      origin       = label_origin,
+      horizon      = h,
+      es           = compute_energy_score(joint_mat, actuals_joint,
+                                          n_subsample = n_es_subsample),
+      mai_rp_zp    = mean(sum_rp) - mean(sum_zp),
+      mai_zp_sp    = mean(sum_zp) - mean(sum_sp),
+      mai_sp_pp    = mean(sum_sp) - mean(sum_pp),
+      mai_pp_total = mean(sum_pp) - mean(draws_t),
+      mai_rp_total = mean(sum_rp) - mean(draws_t),
+      jsd_rp_zp    = JSD_metric(sum_rp, sum_zp),
+      jsd_zp_sp    = JSD_metric(sum_zp, sum_sp),
+      jsd_sp_pp    = JSD_metric(sum_sp, sum_pp),
+      jsd_pp_total = JSD_metric(sum_pp, draws_t),
+      jsd_rp_total = JSD_metric(sum_rp, draws_t)
+    )
+  }))
   
   list(univariate = univariate_df, multivariate = multivariate_df)
-})
+}
 
-# ── Collect and save ───────────────────────────────────────────────────────────
+# ── Compute and save base accuracy ─────────────────────────────────────────────
 
-origin_univariate   <- bind_rows(lapply(horizon_results, `[[`, "univariate"))
-origin_multivariate <- bind_rows(lapply(horizon_results, `[[`, "multivariate"))
+base_acc <- make_accuracy(
+  fc_rp_orig, fc_zp_orig, fc_sp_orig, fc_pp_orig, fc_total_orig,
+  label_origin = origin
+)
 
 saveRDS(
-  list(
-    univariate   = origin_univariate,
-    multivariate = origin_multivariate
-  ),
+  base_acc,
   file.path(dir_accuracy, sprintf("accuracy_timestep_%03d.rds", origin))
 )

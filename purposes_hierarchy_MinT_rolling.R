@@ -496,17 +496,21 @@ stanFit <- sampling(
 saveRDS(stanFit, file.path(dir_stanfits, sprintf("stanfit_timestep_%03d.rds", origin)))
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-compute_energy_score <- function(draws_mat, actuals, sub_idx = NULL) {
-  if (!is.null(sub_idx)) draws_mat <- draws_mat[sub_idx, , drop = FALSE]
-  col_sds    <- apply(draws_mat, 2, sd)
-  draws_sc   <- sweep(draws_mat, 2, col_sds, "/")
-  actuals_sc <- as.numeric(actuals) / col_sds
-  diffs1     <- sweep(draws_sc, 2, actuals_sc, "-")
-  t1         <- mean(sqrt(rowSums(diffs1^2)))
-  pw         <- dist(draws_sc, method = "euclidean")
-  t2         <- mean(pw)
-  t1 - 0.5 * t2
+compute_energy_score <- function(draws_mat, actuals, n_subsample = NULL) {
+  n_draws <- nrow(draws_mat)
+  if (!is.null(n_subsample) && n_subsample < n_draws) {
+    idx1 <- sample.int(n_draws, size = n_subsample, replace = FALSE)
+    idx2 <- sample.int(n_draws, size = n_subsample, replace = FALSE)
+    x    <- draws_mat[idx1, , drop = FALSE]
+    xs   <- draws_mat[idx2, , drop = FALSE]
+  } else {
+    x    <- draws_mat
+    xs   <- draws_mat[sample.int(n_draws), , drop = FALSE] # Crucial Fix: shuffle rows
+  }
+  diffs <- sweep(x, 2, as.numeric(actuals), "-")
+  t1    <- mean(sqrt(rowSums(diffs^2)))
+  t2    <- mean(sqrt(rowSums((x - xs)^2)))
+  return(t1 - 0.5 * t2)
 }
 
 JSD_metric <- function(p_draws, q_draws, n_grid = 1000) {
@@ -516,171 +520,128 @@ JSD_metric <- function(p_draws, q_draws, n_grid = 1000) {
   q_kde <- pmax(density(q_draws, from = lo, to = hi, n = n_grid)$y, 1e-300)
   m_kde <- 0.5 * (p_kde + q_kde)
   dx    <- (hi - lo) / (n_grid - 1)
-  jsd   <- 0.5 * (sum(p_kde * log(p_kde / m_kde)) +
-                    sum(q_kde * log(q_kde / m_kde))) * dx
+  jsd   <- 0.5 * (sum(p_kde * log(p_kde / m_kde)) + sum(q_kde * log(q_kde / m_kde))) * dx
   sqrt(max(0, min(log(2), jsd)))
 }
 
-# ── Extract draws ──────────────────────────────────────────────────────────────
+# ── Single-pass extraction ─────────────────────────────────────────────────────
 
-fc_rp_draws    <- rstan::extract(stanFit, pars = "Y_fc_rp")$Y_fc_rp
-fc_zp_draws    <- rstan::extract(stanFit, pars = "Y_fc_zp")$Y_fc_zp
-fc_sp_draws    <- rstan::extract(stanFit, pars = "Y_fc_sp")$Y_fc_sp
-fc_pp_draws    <- rstan::extract(stanFit, pars = "Y_fc_pp")$Y_fc_pp
-fc_total_draws <- rstan::extract(stanFit, pars = "Y_fc_total")$Y_fc_total
+all_pars <- rstan::extract(stanFit, pars = c(
+  "Y_fc_rp", "Y_fc_zp", "Y_fc_sp", "Y_fc_pp", "Y_fc_total",
+  "fitted_rp", "fitted_zp", "fitted_sp", "fitted_pp", "fitted_total"
+))
 
-fitted_rp_draws    <- rstan::extract(stanFit, pars = "fitted_rp")$fitted_rp
-fitted_zp_draws    <- rstan::extract(stanFit, pars = "fitted_zp")$fitted_zp
-fitted_sp_draws    <- rstan::extract(stanFit, pars = "fitted_sp")$fitted_sp
-fitted_pp_draws    <- rstan::extract(stanFit, pars = "fitted_pp")$fitted_pp
-fitted_total_draws <- rstan::extract(stanFit, pars = "fitted_total")$fitted_total
+fc_rp_draws    <- all_pars$Y_fc_rp
+fc_zp_draws    <- all_pars$Y_fc_zp
+fc_sp_draws    <- all_pars$Y_fc_sp
+fc_pp_draws    <- all_pars$Y_fc_pp
+fc_total_draws <- all_pars$Y_fc_total
 
 n_draws <- nrow(fc_rp_draws)
 
 # ── Back-transform to original scale ──────────────────────────────────────────
 
-fc_rp_orig <- fc_rp_draws[, 1:horizon, , drop = FALSE] * Y_sd + Y_mean
+fc_rp_orig    <- fc_rp_draws[, 1:horizon, , drop = FALSE] * Y_sd + Y_mean
+fc_total_orig <- fc_total_draws[, 1:horizon, drop = FALSE] * Y_sd + Y_mean * n_rp
 
 fc_zp_orig <- array(NA_real_, dim = c(n_draws, horizon, n_zp))
-for (z in 1:n_zp)
+for (z in seq_len(n_zp))
   fc_zp_orig[, , z] <- fc_zp_draws[, 1:horizon, z] * Y_sd + Y_mean * rp_per_zp[z]
 
 fc_sp_orig <- array(NA_real_, dim = c(n_draws, horizon, n_sp))
-for (s in 1:n_sp)
+for (s in seq_len(n_sp))
   fc_sp_orig[, , s] <- fc_sp_draws[, 1:horizon, s] * Y_sd + Y_mean * rp_per_sp[s]
 
 fc_pp_orig <- array(NA_real_, dim = c(n_draws, horizon, n_pp))
-for (p in 1:n_pp)
+for (p in seq_len(n_pp))
   fc_pp_orig[, , p] <- fc_pp_draws[, 1:horizon, p] * Y_sd + Y_mean * rp_per_pp[p]
 
-fc_total_orig <- fc_total_draws[, 1:horizon, drop = FALSE] * Y_sd + Y_mean * n_rp
+rm(fc_rp_draws, fc_zp_draws, fc_sp_draws, fc_pp_draws, fc_total_draws)
 
-# ── MinT reconciliation ────────────────────────────────────────────────────────
-# Strategy: estimate W (the n_all x n_all residual covariance) from the
-# posterior-mean fitted values over the training window, then apply the
-# closed-form MinT projection draw-by-draw to the base forecast samples.
-#
-# MinT formula (Wickramasuriya et al. 2019):
-#   P = S (S' W^{-1} S)^{-1} S' W^{-1}
-#   y_tilde = P y_hat
-#
-# We use the "shrinkage" (MinT-shr) estimator for W to keep it well-conditioned:
-#   W_shr = (1 - rho) * W_sample + rho * diag(W_sample)
-# with the Ledoit-Wolf-style shrinkage intensity rho estimated analytically.
+# ── Build posterior-mean residuals for MinT W matrix ──────────────────────────
 
-# ── Build posterior-mean residuals in original scale ──────────────────────────
+pm_fitted_rp    <- apply(all_pars$fitted_rp,    2:3, mean)
+pm_fitted_zp    <- apply(all_pars$fitted_zp,    2:3, mean)
+pm_fitted_sp    <- apply(all_pars$fitted_sp,    2:3, mean)
+pm_fitted_pp    <- apply(all_pars$fitted_pp,    2:3, mean)
+pm_fitted_total <- apply(all_pars$fitted_total, 2,   mean)
 
-# Posterior mean of fitted values across draws, then back-transform
-pm_fitted_rp    <- apply(fitted_rp_draws,    2:3, mean)   # [T_train, n_rp]
-pm_fitted_zp    <- apply(fitted_zp_draws,    2:3, mean)
-pm_fitted_sp    <- apply(fitted_sp_draws,    2:3, mean)
-pm_fitted_pp    <- apply(fitted_pp_draws,    2:3, mean)
-pm_fitted_total <- apply(fitted_total_draws, 2,   mean)   # [T_train]
+rm(all_pars)
 
-# Back-transform fitted values to original scale
-fit_rp_orig <- pm_fitted_rp * Y_sd + Y_mean
+fit_rp_orig    <- pm_fitted_rp    * Y_sd + Y_mean
+fit_total_orig <- pm_fitted_total * Y_sd + Y_mean * n_rp
 
 fit_zp_orig <- pm_fitted_zp
-for (z in 1:n_zp)
+for (z in seq_len(n_zp))
   fit_zp_orig[, z] <- pm_fitted_zp[, z] * Y_sd + Y_mean * rp_per_zp[z]
 
 fit_sp_orig <- pm_fitted_sp
-for (s in 1:n_sp)
+for (s in seq_len(n_sp))
   fit_sp_orig[, s] <- pm_fitted_sp[, s] * Y_sd + Y_mean * rp_per_sp[s]
 
 fit_pp_orig <- pm_fitted_pp
-for (p in 1:n_pp)
+for (p in seq_len(n_pp))
   fit_pp_orig[, p] <- pm_fitted_pp[, p] * Y_sd + Y_mean * rp_per_pp[p]
 
-fit_total_orig <- pm_fitted_total * Y_sd + Y_mean * n_rp
-
-# Actuals over training window in original scale
-act_rp_train    <- Y_raw_rp[train_idx, ]
-act_zp_train    <- Y_raw_zp[train_idx, ]
-act_sp_train    <- Y_raw_sp[train_idx, ]
-act_pp_train    <- Y_raw_pp[train_idx, ]
-act_total_train <- Y_raw_total[train_idx]
-
-# Residuals: [T_train, n_all], column order matches S row order
-# (total | pp | sp | zp | rp)
 E <- cbind(
-  act_total_train - fit_total_orig,
-  act_pp_train    - fit_pp_orig,
-  act_sp_train    - fit_sp_orig,
-  act_zp_train    - fit_zp_orig,
-  act_rp_train    - fit_rp_orig
-)   # [T_train x n_all]
+  Y_raw_total[train_idx] - fit_total_orig,
+  Y_raw_pp[train_idx, ]  - fit_pp_orig,
+  Y_raw_sp[train_idx, ]  - fit_sp_orig,
+  Y_raw_zp[train_idx, ]  - fit_zp_orig,
+  Y_raw_rp[train_idx, ]  - fit_rp_orig
+)
+
+rm(pm_fitted_rp, pm_fitted_zp, pm_fitted_sp, pm_fitted_pp, pm_fitted_total,
+   fit_rp_orig, fit_zp_orig, fit_sp_orig, fit_pp_orig, fit_total_orig)
 
 # ── Ledoit-Wolf shrinkage covariance (MinT-shr) ────────────────────────────────
 
 lw_shrink <- function(E) {
-  T  <- nrow(E)
-  n  <- ncol(E)
-  Sc <- cov(E)                          # sample covariance
-  d  <- diag(Sc)                        # diagonal target
-  # Oracle shrinkage intensity following Ledoit & Wolf (2004) simplified form
-  # rho = sum_{i != j} Var(s_ij) / sum_{i != j} s_ij^2
-  # Approximate via the Schafer-Strimmer closed form:
-  E_c   <- sweep(E, 2, colMeans(E), "-")
-  xs    <- E_c^2
-  xss   <- crossprod(E_c)               # S * (T-1) if un-normalised, but we use cov()
-  # Estimate var of each off-diagonal element
+  T   <- nrow(E)
+  Sc  <- cov(E)
+  d   <- diag(Sc)
+  E_c <- sweep(E, 2, colMeans(E), "-")
+  xs      <- E_c^2
+  xss     <- crossprod(E_c)
   var_sij <- (T / (T - 1)^3) * (crossprod(xs) - (1 / T) * xss^2)
   denom   <- sum(xss[upper.tri(xss)]^2) / (T - 1)^2
   rho_hat <- if (denom < .Machine$double.eps) 0 else
     min(1, sum(var_sij[upper.tri(var_sij)]) / denom)
-  W <- (1 - rho_hat) * Sc + rho_hat * diag(d)
-  W
+  (1 - rho_hat) * Sc + rho_hat * diag(d)
 }
 
 W <- lw_shrink(E)
+rm(E)
 
-# ── Precompute MinT projection matrix P = S (S'W^{-1}S)^{-1} S'W^{-1} ─────────
-# Work with sparse S and solve systems rather than forming W^{-1} directly.
+# ── Precompute MinT projection matrix P = S(S'W^{-1}S)^{-1}S'W^{-1} ──────────
 
-S_mat <- S   # [n_all x n_rp], dense integer matrix — convert for arithmetic
+S_mat <- S
 storage.mode(S_mat) <- "double"
 
-# Solve W X = S  =>  X = W^{-1} S   [n_all x n_rp]
 WinvS <- tryCatch(
   solve(W, S_mat),
-  error = function(e) {
-    # Fallback: ridge-regularise W
-    W_reg <- W + diag(1e-6 * mean(diag(W)), nrow(W))
-    solve(W_reg, S_mat)
-  }
+  error = function(e)
+    solve(W + diag(1e-6 * mean(diag(W)), nrow(W)), S_mat)
 )
 
-# S' W^{-1} S  [n_rp x n_rp]
-StWinvS <- crossprod(S_mat, WinvS)
+StWinvS_chol <- chol(crossprod(S_mat, WinvS))
 
-# Cholesky for stable inversion
-StWinvS_chol <- chol(StWinvS)
+# P_mint: [n_all x n_all]
+P_mint <- S_mat %*% chol2inv(StWinvS_chol) %*% t(WinvS)
 
-# P = S (S'W^{-1}S)^{-1} (W^{-1}S)'   but we apply it as:
-#   y_tilde = S * solve(StWinvS, t(S) %*% solve(W, y_hat))
-# so we precompute the operator that maps y_hat -> y_tilde
+rm(W, WinvS, StWinvS_chol)
 
-mint_reconcile <- function(y_hat) {
-  # y_hat: numeric vector of length n_all (order: total | pp | sp | zp | rp)
-  # returns reconciled vector of same length
-  rhs    <- crossprod(S_mat, solve(W, y_hat))        # S' W^{-1} y_hat  [n_rp]
-  bottom <- chol2inv(StWinvS_chol) %*% rhs           # (S'W^{-1}S)^{-1} rhs [n_rp]
-  as.numeric(S_mat %*% bottom)                        # S * bottom  [n_all]
-}
+# ── Define Index Positions Within Matrix Structure ───────────────────────────
+# Consistent with: total | pp (n_pp) | sp (n_sp) | zp (n_zp) | rp (n_rp)
 
-# ── Apply MinT draw-by-draw for each horizon ───────────────────────────────────
-# fc arrays are [n_draws, horizon, n_series]; we need [n_draws, horizon, n_all]
-# after reconciliation then split back out.
-
-# Index positions within the n_all reconciled vector
 idx_total <- 1L
 idx_pp    <- 1L + seq_len(n_pp)
 idx_sp    <- 1L + n_pp + seq_len(n_sp)
 idx_zp    <- 1L + n_pp + n_sp + seq_len(n_zp)
 idx_rp    <- 1L + n_pp + n_sp + n_zp + seq_len(n_rp)
 
-# Pre-allocate reconciled forecast arrays (same dims as originals)
+# ── Apply MinT to all draws for each horizon ───────────────────────────────────
+
 fc_rp_mint    <- array(NA_real_, dim = c(n_draws, horizon, n_rp))
 fc_zp_mint    <- array(NA_real_, dim = c(n_draws, horizon, n_zp))
 fc_sp_mint    <- array(NA_real_, dim = c(n_draws, horizon, n_sp))
@@ -688,24 +649,26 @@ fc_pp_mint    <- array(NA_real_, dim = c(n_draws, horizon, n_pp))
 fc_total_mint <- matrix(NA_real_, nrow = n_draws, ncol = horizon)
 
 for (h in seq_len(horizon)) {
-  # Build base forecast matrix [n_draws x n_all]
+  # Base draw matrix for this horizon: [n_draws x n_all]
   base_h <- cbind(
     fc_total_orig[, h],
     fc_pp_orig[, h, ],
     fc_sp_orig[, h, ],
     fc_zp_orig[, h, ],
     fc_rp_orig[, h, ]
-  )   # [n_draws x n_all]
+  )
   
-  # Reconcile each draw
-  rec_h <- t(apply(base_h, 1, mint_reconcile))   # [n_draws x n_all]
+  # Vectorised reconciliation
+  rec_h <- base_h %*% t(P_mint)   # [n_draws x n_all]
   
-  fc_total_mint[, h]    <- rec_h[, idx_total]
-  fc_pp_mint[, h, ]     <- rec_h[, idx_pp,    drop = FALSE]
-  fc_sp_mint[, h, ]     <- rec_h[, idx_sp,    drop = FALSE]
-  fc_zp_mint[, h, ]     <- rec_h[, idx_zp,    drop = FALSE]
-  fc_rp_mint[, h, ]     <- rec_h[, idx_rp,    drop = FALSE]
+  fc_total_mint[, h]  <- rec_h[, idx_total]
+  fc_pp_mint[, h, ]   <- rec_h[, idx_pp,   drop = FALSE]
+  fc_sp_mint[, h, ]   <- rec_h[, idx_sp,   drop = FALSE]
+  fc_zp_mint[, h, ]   <- rec_h[, idx_zp,   drop = FALSE]
+  fc_rp_mint[, h, ]   <- rec_h[, idx_rp,   drop = FALSE]
 }
+
+rm(P_mint)
 
 saveRDS(
   list(
@@ -713,9 +676,7 @@ saveRDS(
     fc_zp_mint    = fc_zp_mint,
     fc_sp_mint    = fc_sp_mint,
     fc_pp_mint    = fc_pp_mint,
-    fc_total_mint = fc_total_mint,
-    W             = W,
-    S             = S_mat
+    fc_total_mint = fc_total_mint
   ),
   file.path(dir_mint_samples, sprintf("mint_timestep_%03d.rds", origin))
 )
@@ -728,13 +689,10 @@ actuals_sp    <- Y_raw_sp[test_idx, ]
 actuals_pp    <- Y_raw_pp[test_idx, ]
 actuals_total <- Y_raw_total[test_idx]
 
-# ── Subsample index for ES ─────────────────────────────────────────────────────
+# ── Accuracy helper (shared by base and MinT) ──────────────────────────────────
 
 n_es_subsample <- 1000L
 set.seed(origin)
-sub_idx <- sample.int(n_draws, size = min(n_es_subsample, n_draws), replace = FALSE)
-
-# ── Accuracy helper (shared by base and MinT) ──────────────────────────────────
 
 make_accuracy <- function(fc_rp_arr, fc_zp_arr, fc_sp_arr, fc_pp_arr,
                           fc_total_mat, label_origin) {
@@ -796,10 +754,10 @@ make_accuracy <- function(fc_rp_arr, fc_zp_arr, fc_sp_arr, fc_pp_arr,
   ))
   
   multivariate_df <- bind_rows(lapply(seq_len(horizon), function(h) {
-    rp_mat <- fc_rp_arr[, h, ]
-    zp_mat <- fc_zp_arr[, h, ]
-    sp_mat <- fc_sp_arr[, h, ]
-    pp_mat <- fc_pp_arr[, h, ]
+    rp_mat  <- fc_rp_arr[, h, ]
+    zp_mat  <- fc_zp_arr[, h, ]
+    sp_mat  <- fc_sp_arr[, h, ]
+    pp_mat  <- fc_pp_arr[, h, ]
     draws_t <- fc_total_mat[, h]
     
     sum_rp <- rowSums(rp_mat)
@@ -807,14 +765,16 @@ make_accuracy <- function(fc_rp_arr, fc_zp_arr, fc_sp_arr, fc_pp_arr,
     sum_sp <- rowSums(sp_mat)
     sum_pp <- rowSums(pp_mat)
     
-    joint_mat     <- cbind(rp_mat, zp_mat, sp_mat, pp_mat, draws_t)
-    actuals_joint <- c(actuals_rp[h, ], actuals_zp[h, ],
-                       actuals_sp[h, ], actuals_pp[h, ], actuals_total[h])
+    # CRITICAL FIX: Stacking order changed from (draws_t, pp_mat...) to match 
+    # the exact total | pp | sp | zp | rp sequence used during the MinT calibration step.
+    joint_mat     <- cbind(draws_t, pp_mat, sp_mat, zp_mat, rp_mat)
+    actuals_joint <- c(actuals_total[h], actuals_pp[h, ], actuals_sp[h, ], actuals_zp[h, ], actuals_rp[h, ])
     
     data.frame(
       origin       = label_origin,
       horizon      = h,
-      es           = compute_energy_score(joint_mat, actuals_joint, sub_idx),
+      es           = compute_energy_score(joint_mat, actuals_joint,
+                                          n_subsample = n_es_subsample),
       mai_rp_zp    = mean(sum_rp) - mean(sum_zp),
       mai_zp_sp    = mean(sum_zp) - mean(sum_sp),
       mai_sp_pp    = mean(sum_sp) - mean(sum_pp),
