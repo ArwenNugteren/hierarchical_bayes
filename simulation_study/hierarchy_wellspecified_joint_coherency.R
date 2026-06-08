@@ -36,9 +36,9 @@ N_ROLL     <- 500
 # task_id <- 1
 HORIZON    <- 5
 
-lambda_top <- 1
+lambda_top <- 4
 lambda_mid <- 1
-sigma_coh <- 0.8
+sigma_coh <- sqrt(0.5)
 
 IDX <- list(total = 1L, A = 2L, B = 3L, bot = 4:7)
 
