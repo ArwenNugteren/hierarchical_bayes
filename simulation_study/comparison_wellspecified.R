@@ -17,13 +17,13 @@ methods <- c(
 )
 
 folders <- c(
-  "accuracy_independent_wellspecified_joint",
-  "accuracy_independent_wellspecified_joint_mint",
-  "accuracy_wellspecified_joint",
-  "accuracy_wellspecified_joint_mint",
-  "accuracy_wellspecified_joint_coherency1",
-  "accuracy_wellspecified_joint_coherency0.707",
-  "accuracy_wellspecified_joint_coherency0.707_topweighted"
+  "accuracy_wellspecified_joint_independentv2",
+  "accuracy_wellspecified_joint_independent_mintv2",
+  "accuracy_wellspecified_joint_hierarchical_bayes",
+  "accuracy_wellspecified_joint_hierarchical_bayes_mint",
+  "accuracy_wellspecified_joint_hierarchical_coherency1_v2",
+  "accuracy_wellspecified_joint_hierarchical_coherency0.707v2",
+  # "accuracy_wellspecified_joint_coherency0.707_topweighted"
 )
 
 stopifnot(length(methods) == length(folders))

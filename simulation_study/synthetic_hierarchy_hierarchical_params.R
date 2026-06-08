@@ -5,8 +5,8 @@
 #
 # ARMA(2,2) coefficients drawn from a 3-level Gaussian hyperprior hierarchy:
 #   Level 0: grand mean sampled uniformly from Table 1 ranges
-#   Level 1: group means mu_A, mu_B ~ N(grand_mean, sigma2_hyper1)
-#   Level 2: series coefficients    ~ N(mu_parent,  sigma2_hyper2)
+#   Level 1: group means mu_A, mu_B ~ N(grand_mean, sigma_hyper1)
+#   Level 2: series coefficients    ~ N(mu_parent,  sigma_hyper2)
 #
 # Parameters are sampled in the order that respects their dependence:
 #   phi2, theta2 first (free ranges), then phi1, theta1 conditional on them.
@@ -59,8 +59,8 @@ Sigma_bottom <- matrix(
 # 3.  3-LEVEL HYPERPRIOR SAMPLING FOR ARMA(2,2) COEFFICIENTS
 # =============================================================================
 
-sigma2_hyper1 <- 0.02   # grand mean  -> group means
-sigma2_hyper2 <- 0.01   # group means -> series coefficients
+sigma_hyper1 <- 0.1   # grand mean  -> group means
+sigma_hyper2 <- 0.1   # group means -> series coefficients
 
 # ---------------------------------------------------------------------------
 # Stationarity (AR) and invertibility (MA) checks for ARMA(2,2)
@@ -95,16 +95,16 @@ sample_coefficients <- function(grand_means, max_attempts = 10000) {
     
     # Level 1: group means (2 groups x 4 parameters)
     group_means <- sapply(grand_means, function(gm) {
-      rnorm(2, mean = gm, sd = sqrt(sigma2_hyper1))
+      rnorm(2, mean = gm, sd = sigma_hyper1)
     })
     # group_means: rows = [A, B], cols = [phi1, phi2, theta1, theta2]
     
     # Level 2: series coefficients (4 series x 4 parameters)
     series_coefs <- rbind(
-      rnorm(4, mean = group_means[1, ], sd = sqrt(sigma2_hyper2)),  # AA (parent A)
-      rnorm(4, mean = group_means[1, ], sd = sqrt(sigma2_hyper2)),  # AB (parent A)
-      rnorm(4, mean = group_means[2, ], sd = sqrt(sigma2_hyper2)),  # BA (parent B)
-      rnorm(4, mean = group_means[2, ], sd = sqrt(sigma2_hyper2))   # BB (parent B)
+      rnorm(4, mean = group_means[1, ], sd = sigma_hyper2),  # AA (parent A)
+      rnorm(4, mean = group_means[1, ], sd = sigma_hyper2),  # AB (parent A)
+      rnorm(4, mean = group_means[2, ], sd = sigma_hyper2),  # BA (parent B)
+      rnorm(4, mean = group_means[2, ], sd = sigma_hyper2)   # BB (parent B)
     )
     colnames(series_coefs) <- c("phi1", "phi2", "theta1", "theta2")
     rownames(series_coefs) <- series_names
@@ -124,12 +124,6 @@ sample_coefficients <- function(grand_means, max_attempts = 10000) {
       ))
     }
   }
-  
-  stop(sprintf(
-    "Could not draw valid ARMA coefficients after %d attempts. ",
-    "Consider widening sigma2_hyper1/sigma2_hyper2 or tightening grand mean ranges.",
-    max_attempts
-  ))
 }
 
 # =============================================================================

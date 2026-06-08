@@ -18,17 +18,17 @@ methods <- c(
 )
 
 folders <- c(
-  "accuracy_purposes_independent",
-  "accuracy_purposes_independent_MinT",
+  "accuracy_purposes_independentv2",
+  "accuracy_purposes_independent_MinTv2",
   "accuracy_purposes_hierarchy_v2",
   "accuracy_purposes_hierarchy_MinT",
-  "accuracy_purposes_hierarchy_coherency0.005",
-  "accuracy_purposes_hierarchy_coherency0.002",
+  "accuracy_purposes_hierarchy_coherency0.005v2",
+  "accuracy_purposes_hierarchy_coherency0.002v2",
   "accuracy_purposes_hierarchy_coherency0.002_totalweight_nrp",
   "accuracy_purposes_hierarchy_coherency0.002_purposesweight_nregions"
 )
 
-dir_out <- "comparison_plots"
+dir_out <- "comparison_plots_updated"
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
 base_levels <- c("Overall", "Total", "Purpose", "StatePurpose", "ZonePurpose", "RegionPurpose")

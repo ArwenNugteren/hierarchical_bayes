@@ -176,15 +176,15 @@ model {
   mu_theta2     ~ uniform(-1, 1);
   mu_theta1_raw ~ uniform(-1, 1);
 
-  mu_phi2_A       ~ normal(mu_phi2,       0.14);
-  mu_phi1_raw_A   ~ normal(mu_phi1_raw,   0.14);
-  mu_theta2_A     ~ normal(mu_theta2,     0.14);
-  mu_theta1_raw_A ~ normal(mu_theta1_raw, 0.14);
+  mu_phi2_A       ~ normal(mu_phi2,       0.1);
+  mu_phi1_raw_A   ~ normal(mu_phi1_raw,   0.1);
+  mu_theta2_A     ~ normal(mu_theta2,     0.1);
+  mu_theta1_raw_A ~ normal(mu_theta1_raw, 0.1);
 
-  mu_phi2_B       ~ normal(mu_phi2,       0.14);
-  mu_phi1_raw_B   ~ normal(mu_phi1_raw,   0.14);
-  mu_theta2_B     ~ normal(mu_theta2,     0.14);
-  mu_theta1_raw_B ~ normal(mu_theta1_raw, 0.14);
+  mu_phi2_B       ~ normal(mu_phi2,       0.1);
+  mu_phi1_raw_B   ~ normal(mu_phi1_raw,   0.1);
+  mu_theta2_B     ~ normal(mu_theta2,     0.1);
+  mu_theta1_raw_B ~ normal(mu_theta1_raw, 0.1);
 
   phi2_bot[1]       ~ normal(mu_phi2_A,       0.1);
   phi1_raw_bot[1]   ~ normal(mu_phi1_raw_A,   0.1);

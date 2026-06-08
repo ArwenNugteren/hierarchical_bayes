@@ -63,9 +63,19 @@ test_set    <- 121
 origins     <- 96:(96 + test_set - 1)
 
 # ── Get this task's origin from PBS array index ────────────────────────────────
+# 
+# task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
+# origin  <- origins[task_id]
+# ── Get this task's origin from PBS array index (Modified for specific re-runs) ──
 
+# Define the specific origins you want to re-run
+rerun_origins <- c(106, 125, 126, 182)
+
+# Get the array index (e.g., if your PBS array is #PBS -t 1-3)
 task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
-origin  <- origins[task_id]
+
+# Map the task ID (1, 2, 3) to your specific origin values
+origin <- rerun_origins[task_id]
 
 # ── Training and test windows ──────────────────────────────────────────────────
 
@@ -96,7 +106,7 @@ lambda_total <- 1
 lambda_pp    <- 1
 lambda_sp    <- 1
 lambda_zp    <- 1
-sigma_coh    <- 0.002 * n_rp
+sigma_coh    <- 0.005 * n_rp
 
 # ── Stan model ─────────────────────────────────────────────────────────────────
 

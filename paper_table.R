@@ -18,19 +18,19 @@ methods <- c(
 )
 
 folders <- c(
-  "accuracy_purposes_independent",
-  "accuracy_purposes_independent_MinT",
+  "accuracy_purposes_independentv2",
+  "accuracy_purposes_independent_MinTv2",
   "accuracy_purposes_hierarchy_v2",
   "accuracy_purposes_hierarchy_MinT",
-  "accuracy_purposes_hierarchy_coherency0.005",
-  "accuracy_purposes_hierarchy_coherency0.002",
+  "accuracy_purposes_hierarchy_coherency0.005v2",
+  "accuracy_purposes_hierarchy_coherency0.002v2",
   "accuracy_purposes_hierarchy_coherency0.002_totalweight_nrp",
   "accuracy_purposes_hierarchy_coherency0.002_purposesweight_nregions"
 )
 
 stopifnot(length(methods) == length(folders))
 
-dir_out <- "comparison_plots"
+dir_out <- "comparison_plots_updated"
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
 # Structural hierarchy ordering matching original raw factors
@@ -80,7 +80,7 @@ load_method <- function(folder, method_name) {
   multi_clean <- all_multi %>%
     dplyr::group_by(horizon) %>%
     dplyr::summarise(
-      across(starts_with(c("mai_", "jsd_")), ~ mean(.x, na.rm = TRUE)),
+      across(starts_with(c("mai_", "jsd_")), ~ mean(abs(.x), na.rm = TRUE)),
       es = mean(es, na.rm = TRUE),
       .groups = "drop"
     ) %>%
@@ -229,11 +229,15 @@ write.csv(coverage_95_by_level,
 # 6. RE-ENGINEER COHESION SEGMENTS FOR ALL TIER COMBINATIONS (Wide Format)
 # =============================================================================
 
+# =============================================================================
+# REPAIRED COHESION SEGMENTS FOR ALL TIER COMBINATIONS
+# =============================================================================
+
 clean_pair_labels <- function(raw_col) {
   raw_col %>%
     stringr::str_remove("^(mai_|jsd_)") %>%
-    stringr::str_replace("_to_", " -> ") %>%
-    stringr::str_replace("_", " -> ") %>%
+    # Use explicit anchors or replace all instances safely so names don't collapse
+    stringr::str_replace_all("_", " -> ") %>% 
     stringr::str_to_upper()
 }
 

@@ -17,13 +17,13 @@ methods <- c(
 )
 
 folders <- c(
-  "accuracy_independent_misspecified",
-  "accuracy_independent_misspecified_mint",
-  "accuracy_hierarchical_misspecified",
-  "accuracy_hierarchical_misspecified_mint",
-  "accuracy_misspecified_coherency1",
-  "accuracy_misspecified_coherency0.707",
-  "accuracy_misspecified_coherency0.707_topweighted"
+  # "accuracy_independent_misspecified",
+  # "accuracy_independent_misspecified_mint",
+  "accuracy_misspecified_hierarchical_v2",
+  "accuracy_misspecified_hierarchical_mint_v2",
+  # "accuracy_misspecified_coherency1",
+  # "accuracy_misspecified_coherency0.707",
+  # "accuracy_misspecified_coherency0.707_topweighted"
 )
 
 stopifnot(length(methods) == length(folders))

@@ -36,7 +36,7 @@ N_ROLL     <- 500
 # task_id <- 1
 HORIZON    <- 5
 
-lambda_top <- 4
+lambda_top <- 1
 lambda_mid <- 1
 sigma_coh <- sqrt(0.5)
 

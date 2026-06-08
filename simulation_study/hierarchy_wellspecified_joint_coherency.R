@@ -177,15 +177,15 @@ model {
   mu_theta2     ~ uniform(-1, 1);
   mu_theta1_raw ~ uniform(-1, 1);
 
-  mu_phi2_A       ~ normal(mu_phi2,       0.14);
-  mu_phi1_raw_A   ~ normal(mu_phi1_raw,   0.14);
-  mu_theta2_A     ~ normal(mu_theta2,     0.14);
-  mu_theta1_raw_A ~ normal(mu_theta1_raw, 0.14);
+  mu_phi2_A       ~ normal(mu_phi2,       0.1);
+  mu_phi1_raw_A   ~ normal(mu_phi1_raw,   0.1);
+  mu_theta2_A     ~ normal(mu_theta2,     0.1);
+  mu_theta1_raw_A ~ normal(mu_theta1_raw, 0.1);
 
-  mu_phi2_B       ~ normal(mu_phi2,       0.14);
-  mu_phi1_raw_B   ~ normal(mu_phi1_raw,   0.14);
-  mu_theta2_B     ~ normal(mu_theta2,     0.14);
-  mu_theta1_raw_B ~ normal(mu_theta1_raw, 0.14);
+  mu_phi2_B       ~ normal(mu_phi2,       0.1);
+  mu_phi1_raw_B   ~ normal(mu_phi1_raw,   0.1);
+  mu_theta2_B     ~ normal(mu_theta2,     0.1);
+  mu_theta1_raw_B ~ normal(mu_theta1_raw, 0.1);
 
   phi2_bot[1]       ~ normal(mu_phi2_A,       0.1);
   phi1_raw_bot[1]   ~ normal(mu_phi1_raw_A,   0.1);
@@ -455,20 +455,20 @@ for (roll in roll_start:roll_end) {
     ) %>% mutate(horizon = h, .after = roll)
     
     # Multivariate coherence metrics
-    bot_mat      <- fc_bot_arr[, h, ]
+    bot_mat      <- fc_bot[, h, ]   
     sum_bot      <- rowSums(bot_mat)
-    sum_mid      <- fc_A_mat[, h] + fc_B_mat[, h]
-    draws_total  <- fc_total_mat[, h]
+    sum_mid      <- fc_A[, h] + fc_B[, h] 
+    draws_total  <- fc_total[, h]   
     
     # Explicitly align columns to match S_mat: [Total, A, B, AA, AB, BA, BB]
     joint_mat <- cbind(
-      draws_total,         # Column 1: Total
-      fc_A_mat[, h],       # Column 2: A
-      fc_B_mat[, h],       # Column 3: B
-      bot_mat[, 1],        # Column 4: AA
-      bot_mat[, 2],        # Column 5: AB
-      bot_mat[, 3],        # Column 6: BA
-      bot_mat[, 4]         # Column 7: BB
+      draws_total,         # Correctly uses fixed draws_total
+      fc_A[, h],           # FIX: Changed from fc_A_mat[, h]
+      fc_B[, h],           # FIX: Changed from fc_B_mat[, h]
+      bot_mat[, 1],        # Correctly uses fixed bot_mat
+      bot_mat[, 2],
+      bot_mat[, 3],
+      bot_mat[, 4]
     )
     
     # Align target vector to match the same coordinate mapping space
