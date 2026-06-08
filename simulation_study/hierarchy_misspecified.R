@@ -290,8 +290,8 @@ for (roll in roll_start:roll_end) {
     data    = stan_data,
     seed    = 2025,
     chains  = 10,
-    iter    = 2000,
-    warmup  = 1000,
+    iter    = 200,
+    warmup  = 100,
     cores   = 10,
     refresh = 0
   )
