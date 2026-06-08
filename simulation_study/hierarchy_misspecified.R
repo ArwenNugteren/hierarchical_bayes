@@ -432,16 +432,24 @@ for (roll in roll_start:roll_end) {
   }
   
   compute_energy_score <- function(draws_mat, actuals, sub_idx = NULL) {
-    if (!is.null(sub_idx)) draws_mat <- draws_mat[sub_idx, , drop = FALSE]
-    col_sds    <- apply(draws_mat, 2, sd)
-    draws_sc   <- sweep(draws_mat, 2, col_sds, "/")
-    actuals_sc <- as.numeric(actuals) / col_sds
-    diffs1     <- sweep(draws_sc, 2, actuals_sc, "-")
-    t1         <- mean(sqrt(rowSums(diffs1^2)))
-    t2         <- mean(dist(draws_sc, method = "euclidean"))
-    t1 - 0.5 * t2
+    # Apply subsampling if requested for computational tractability
+    if (!is.null(sub_idx)) {
+      draws_mat <- draws_mat[sub_idx, , drop = FALSE]
+    }
+    
+    # Ensure actuals is a numeric vector matching the columns of draws_mat
+    actuals <- as.numeric(actuals)
+    
+    # Term 1: Mean Euclidean distance from each posterior draw to the actuals
+    diffs1 <- sweep(draws_mat, 2, actuals, "-")
+    t1     <- mean(sqrt(rowSums(diffs1^2)))
+    
+    # Term 2: Mean pairwise Euclidean distance between all posterior draws
+    t2     <- mean(dist(draws_mat, method = "euclidean"))
+    
+    # Energy Score formula
+    return(t1 - 0.5 * t2)
   }
-  
   n_es_subsample <- 1000L
   set.seed(roll)
   sub_idx <- sample.int(n_draws, size = min(n_es_subsample, n_draws), replace = FALSE)
@@ -496,8 +504,19 @@ for (roll in roll_start:roll_end) {
       sum_mid      <- fc_A_mat[, h] + fc_B_mat[, h]
       draws_total  <- fc_total_mat[, h]
       
-      joint_mat     <- cbind(bot_mat, fc_A_mat[, h], fc_B_mat[, h], draws_total)
-      actuals_joint <- c(actual_bot, actual_A, actual_B, actual_total)
+      # Explicitly align columns to match S_mat: [Total, A, B, AA, AB, BA, BB]
+      joint_mat <- cbind(
+        draws_total,         # Column 1: Total
+        fc_A_mat[, h],       # Column 2: A
+        fc_B_mat[, h],       # Column 3: B
+        bot_mat[, 1],        # Column 4: AA
+        bot_mat[, 2],        # Column 5: AB
+        bot_mat[, 3],        # Column 6: BA
+        bot_mat[, 4]         # Column 7: BB
+      )
+      
+      # Align target vector to match the same coordinate mapping space
+      actuals_joint <- c(actual_total, actual_A, actual_B, actual_bot)
       es_val        <- compute_energy_score(joint_mat, actuals_joint, sub_idx)
       
       multivariate_df <- data.frame(
