@@ -4,7 +4,7 @@ library(rstan)
 
 # ── 1. Setup Directories & Load Data ──────────────────────────────────────────
 load("tourism.Rdata")
-job_name <- "tourism_job_21996540"
+job_name <- "tourism_job_22307345"
 
 dir_stanfits    <- file.path(job_name, "stanfits")
 dir_output_base <- file.path(job_name, "post_hoc_es_base")

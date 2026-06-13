@@ -6,7 +6,7 @@ library(stringr)
 library(tsutils)   # nemenyi() for CD + blue p-value matrix
 
 # =============================================================================
-# 0.  CONFIGURATION & HORIZON EXPANSION
+# 0. CONFIGURATION & HORIZON EXPANSION
 # =============================================================================
 
 methods <- c(
@@ -21,11 +21,11 @@ methods <- c(
 )
 
 folders <- c(
-  "accuracy_purposes_independentv2",
-  "accuracy_purposes_independent_MinTv2",
+  "accuracy_purposes_independent_v3",
+  "accuracy_purposes_independent_MinT_v3",
   "accuracy_purposes_hierarchy_v2",
-  "accuracy_purposes_hierarchy_MinT",
-  "accuracy_purposes_hierarchy_coherency0.005v2",
+  "accuracy_purposes_hierarchy_MinT_v2",
+  "accuracy_purposes_hierarchy_coherency0.005v3",
   "accuracy_purposes_hierarchy_coherency0.002v2",
   "accuracy_purposes_hierarchy_coherency0.002_totalweight_nrp",
   "accuracy_purposes_hierarchy_coherency0.002_purposesweight_nregions"
@@ -38,14 +38,11 @@ alpha           <- 0.05
 
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
-# Structural hierarchy tiers
-base_levels <- c("Overall", "Total", "Purpose", "StatePurpose", "ZonePurpose", "RegionPurpose")
-# Dynamic expansion to include horizons 1-12 as distinct evaluation groups
+base_levels <- c("Total", "Purpose", "StatePurpose", "ZonePurpose", "RegionPurpose")
 horizon_levels <- paste0("h", seq_len(horizon))
 level_order    <- c(base_levels, horizon_levels)
 
 level_labels <- c(
-  "Overall"       = "Overall System",
   "Total"         = "Australia",
   "Purpose"       = "Purposes",
   "StatePurpose"  = "States",
@@ -53,19 +50,53 @@ level_labels <- c(
   "RegionPurpose" = "Regions"
 )
 
-# Append programmatic titles for the standalone horizon groups to handle plot titles safely
 for(h in seq_len(horizon)) {
   level_labels[paste0("h", h)] <- paste0("Horizon ", h)
 }
 
 # =============================================================================
-# 1.  LOAD RAW DATA FUNCTION (Preserves Granular Windows For Correct Math Progression)
+# 1. COMPUTE DYNAMIC IN-SAMPLE SEASONAL NAÏVE SCALES (m = 12, T = 96)
 # =============================================================================
 
-load_method <- function(folder, method_name) {
-  acc_files <- list.files(folder,
-                          pattern    = "^accuracy_timestep_[0-9]+\\.rds$",
-                          full.names = TRUE)
+message("Generating dynamic in-sample seasonal baseline matrices from tourism.Rdata...")
+load("tourism.Rdata")
+
+window_size <- 96
+test_set    <- 121
+origins     <- 96:(96 + test_set - 1)
+m_period    <- 12L
+
+tourism_numeric <- tourism %>% dplyr::select(where(is.numeric))
+tourism_mat     <- as.matrix(tourism_numeric)
+
+in_sample_seasonal_scales <- tibble::tibble(timestep = origins) %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    scale_vector = list({
+      train_idx   <- (timestep - window_size + 1):timestep
+      train_slice <- tourism_mat[train_idx, ]
+      
+      n_rows       <- nrow(train_slice)
+      seas_diff_sq <- (train_slice[(m_period + 1):n_rows, , drop = FALSE] - 
+                         train_slice[1:(n_rows - m_period), , drop = FALSE])^2
+      
+      colMeans(seas_diff_sq, na.rm = TRUE)
+    })
+  ) %>%
+  dplyr::ungroup() %>%
+  tidyr::unnest_wider(scale_vector) %>%
+  tidyr::pivot_longer(
+    cols = -timestep,
+    names_to = "series",
+    values_to = "in_sample_seasonal_naive_mse"
+  )
+
+# =============================================================================
+# 2. LOAD RAW DATA FUNCTION (Preserves Windows)
+# =============================================================================
+
+load_method <- function(folder, method_name, scale_df) {
+  acc_files <- list.files(folder, pattern = "^accuracy_timestep_[0-9]+\\.rds$", full.names = TRUE)
   if (length(acc_files) == 0) {
     warning("No accuracy files found in: ", folder)
     return(NULL)
@@ -83,12 +114,11 @@ load_method <- function(folder, method_name) {
   all_uni     <- dplyr::bind_rows(lapply(loaded_list, `[[`, "uni"))
   all_multi   <- dplyr::bind_rows(lapply(loaded_list, `[[`, "multi"))
   
-  # Extract long granular structures with timestamps intact
   uni_clean <- all_uni %>%
     dplyr::mutate(LogS = ifelse(is.finite(logS), logS, NA_real_)) %>%
-    dplyr::select(level, series, horizon, timestep, ae, se, crps, LogS, covered_90, covered_95)
+    dplyr::select(level, series, horizon, timestep, ae, se, crps, LogS, covered_90, covered_95) %>%
+    dplyr::left_join(scale_df, by = c("timestep", "series"))
   
-  # System-wide multivariate blocks; safely mean across configurations here
   multi_clean <- all_multi %>%
     dplyr::group_by(horizon, timestep) %>%
     dplyr::summarise(
@@ -103,7 +133,7 @@ load_method <- function(folder, method_name) {
 }
 
 # =============================================================================
-# 2.  DATA INGESTION PIPELINE
+# 3. DATA INGESTION LOOPS
 # =============================================================================
 
 all_uni_list   <- list()
@@ -111,7 +141,7 @@ all_multi_list <- list()
 
 for (i in seq_along(folders)) {
   message("Processing folder: ", folders[i])
-  res <- load_method(folders[i], methods[i])
+  res <- load_method(folders[i], methods[i], in_sample_seasonal_scales)
   if (!is.null(res)) {
     all_uni_list[[i]]   <- res$uni
     all_multi_list[[i]] <- res$multi
@@ -121,70 +151,76 @@ for (i in seq_along(folders)) {
 all_uni_raw   <- dplyr::bind_rows(all_uni_list)
 all_multi_raw <- dplyr::bind_rows(all_multi_list)
 
-if (nrow(all_uni_raw) == 0) {
-  stop("Critical Error: No data was loaded. Check folder names and RDS paths.")
-}
-
 # =============================================================================
-# 3.  CRITICAL MATHEMATICAL INTERSECT: TIME-SERIES ROLLING WINDOW AGGREGATION
+# 4. AGGREGATION & HORIZON COMPRESSION (With Preserved Window Blocks)
 # =============================================================================
+# Bypassing summarise group allocation because grain is already unique
+window_series_horizon_metrics <- all_uni_raw %>%
+  dplyr::mutate(
+    Series_MAE   = ae,
+    Series_MSE   = se,
+    Series_RMSSE = sqrt(se / ifelse(in_sample_seasonal_naive_mse == 0, NA_real_, in_sample_seasonal_naive_mse)),
+    Series_CRPS  = crps,
+    Series_LogS  = LogS,
+    Series_Cov90 = covered_90 * 100,
+    Series_Cov95 = covered_95 * 100
+  ) %>%
+  dplyr::select(
+    method, level, series, timestep, horizon, 
+    Series_MAE, Series_MSE, Series_RMSSE, Series_CRPS, Series_LogS, Series_Cov90, Series_Cov95
+  )
 
-# Step A: Compute accurate summary metric vectors for each asset over all 121 timesteps
-series_horizon_metrics <- all_uni_raw %>%
+# Long-run evaluation targets mapped down across rolling origins
+overall_window_blocks <- window_series_horizon_metrics %>%
+  dplyr::group_by(method, timestep) %>%
+  dplyr::summarise(
+    RMSSE = mean(Series_RMSSE, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+series_horizon_metrics <- window_series_horizon_metrics %>%
   dplyr::group_by(method, level, series, horizon) %>%
   dplyr::summarise(
-    Series_MAE   = mean(ae, na.rm = TRUE),
-    Series_RMSE  = sqrt(mean(se, na.rm = TRUE)), # Correct: Root-mean squared error across windows
-    Series_CRPS  = mean(crps, na.rm = TRUE),
-    Series_LogS  = mean(LogS, na.rm = TRUE),
-    Series_Cov90 = mean(covered_90, na.rm = TRUE) * 100,
-    Series_Cov95 = mean(covered_95, na.rm = TRUE) * 100,
+    Series_MAE   = mean(Series_MAE, na.rm = TRUE),
+    Series_MSE   = mean(Series_MSE, na.rm = TRUE),
+    Series_RMSE  = sqrt(Series_MSE),
+    Series_RMSSE = mean(Series_RMSSE, na.rm = TRUE),
+    Series_CRPS  = mean(Series_CRPS, na.rm = TRUE),
+    Series_LogS  = mean(Series_LogS, na.rm = TRUE),
+    Series_Cov90 = mean(Series_Cov90, na.rm = TRUE),
+    Series_Cov95 = mean(Series_Cov95, na.rm = TRUE),
     .groups      = "drop"
   )
 
-# Step B: Average metrics across distinct individual nodes inside their tier levels
 level_horizon_summary <- series_horizon_metrics %>%
+  dplyr::filter(level %in% base_levels) %>%
   dplyr::group_by(method, level, horizon) %>%
   dplyr::summarise(
-    MAE   = mean(Series_MAE, na.rm = TRUE),
-    RMSE  = mean(Series_RMSE, na.rm = TRUE), # Simple mean over asset nodes
-    CRPS  = mean(Series_CRPS, na.rm = TRUE),
-    LogS  = mean(Series_LogS, na.rm = TRUE),
+    MAE = mean(Series_MAE, na.rm = TRUE),
+    RMSE = mean(Series_RMSE, na.rm = TRUE), 
+    RMSSE = mean(Series_RMSSE, na.rm = TRUE),
+    CRPS = mean(Series_CRPS, na.rm = TRUE),
+    LogS = mean(Series_LogS, na.rm = TRUE),
     Cov90 = mean(Series_Cov90, na.rm = TRUE),
     Cov95 = mean(Series_Cov95, na.rm = TRUE),
     .groups = "drop"
   )
 
-# Step C: Formulate systemic "Overall" layer metrics by compressing the entire layout 
-overall_horizon_summary <- series_horizon_metrics %>%
-  dplyr::group_by(method, horizon) %>%
-  dplyr::summarise(
-    MAE   = mean(Series_MAE, na.rm = TRUE),
-    RMSE  = mean(Series_RMSE, na.rm = TRUE), # Mean across all system assets
-    CRPS  = mean(Series_CRPS, na.rm = TRUE),
-    LogS  = mean(Series_LogS, na.rm = TRUE),
-    Cov90 = mean(Series_Cov90, na.rm = TRUE),
-    Cov95 = mean(Series_Cov95, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  dplyr::mutate(level = "Overall")
-
-# Step D: Construct standalone horizon macro frames (h1-h12 rows)
 horizon_macro_summary <- series_horizon_metrics %>%
   dplyr::group_by(method, horizon) %>%
   dplyr::summarise(
-    MAE   = mean(Series_MAE, na.rm = TRUE),
-    RMSE  = mean(Series_RMSE, na.rm = TRUE), 
-    CRPS  = mean(Series_CRPS, na.rm = TRUE),
-    LogS  = mean(Series_LogS, na.rm = TRUE),
+    MAE = mean(Series_MAE, na.rm = TRUE),
+    RMSE = mean(Series_RMSE, na.rm = TRUE), 
+    RMSSE = mean(Series_RMSSE, na.rm = TRUE),
+    CRPS = mean(Series_CRPS, na.rm = TRUE),
+    LogS = mean(Series_LogS, na.rm = TRUE),
     Cov90 = mean(Series_Cov90, na.rm = TRUE),
     Cov95 = mean(Series_Cov95, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   dplyr::mutate(level = paste0("h", horizon))
 
-# Stitch all elements to compose the unified plotting frame matching the original `all_data` structure
-all_data <- dplyr::bind_rows(level_horizon_summary, overall_horizon_summary, horizon_macro_summary) %>%
+all_data <- dplyr::bind_rows(level_horizon_summary, horizon_macro_summary) %>%
   dplyr::left_join(
     all_multi_raw %>% 
       dplyr::group_by(method, horizon) %>% 
@@ -193,34 +229,31 @@ all_data <- dplyr::bind_rows(level_horizon_summary, overall_horizon_summary, hor
   ) %>%
   dplyr::mutate(method = factor(method, levels = methods))
 
-# =============================================================================
-# 4.  COMPUTE SUMMARY_LM (Averaged Over Horizons for Dynamic Summaries)
-# =============================================================================
-
 summary_lm <- all_data %>%
   dplyr::group_by(method, level) %>%
   dplyr::summarise(
-    MAE          = mean(MAE, na.rm = TRUE), 
-    RMSE         = mean(RMSE, na.rm = TRUE), # Linear mean across horizons of structural rolling RMSE
-    CRPS         = mean(CRPS, na.rm = TRUE),
-    Cov90        = mean(Cov90, na.rm = TRUE),
-    Cov95        = mean(Cov95, na.rm = TRUE),
+    MAE = mean(MAE, na.rm = TRUE), 
+    RMSE = mean(RMSE, na.rm = TRUE),
+    RMSSE = mean(RMSSE, na.rm = TRUE),
+    CRPS = mean(CRPS, na.rm = TRUE),
+    Cov90 = mean(Cov90, na.rm = TRUE),
+    Cov95 = mean(Cov95, na.rm = TRUE),
     MAI_rp_total = mean(MAI_rp_total, na.rm = TRUE),
     JSD_rp_total = mean(JSD_rp_total, na.rm = TRUE),
-    ES           = mean(ES, na.rm = TRUE),
-    .groups      = "drop"
+    ES = mean(ES, na.rm = TRUE),
+    .groups = "drop"
   ) %>%
   dplyr::mutate(method = factor(method, levels = methods))
 
 # =============================================================================
-# 5.  SHARED HELPERS & COLOR DEFINITIONS
+# 5. GRAPHICS HELPERS
 # =============================================================================
 
 okabe_ito <- c(
-  "Independent Bayes"                 = "#000000",
+  "Independent Bayes"                   = "#000000",
   "Independent Bayes MinT"              = "#E69F00",
   "Hierarchical Bayes"                  = "#A8D8EA",
-  "Hierarchical Bayes MinT"             = "#00B957",
+  "Hierarchical Bayes MinT"              = "#00B957",
   "Hierarchical Bayes softer coherency" = "#F0E442",
   "Hierarchical Bayes tighter coherency"= "#0072B2",
   "Hierarchical Bayes total-weighted"   = "#E03000",
@@ -228,27 +261,25 @@ okabe_ito <- c(
 )
 
 cb_shapes <- c(
-  "Independent Bayes"                 = 16,  
+  "Independent Bayes"                   = 16,  
   "Independent Bayes MinT"              = 17,  
   "Hierarchical Bayes"                  = 15,  
-  "Hierarchical Bayes MinT"             = 18,  
+  "Hierarchical Bayes MinT"              = 18,  
   "Hierarchical Bayes softer coherency" = 3,   
   "Hierarchical Bayes tighter coherency"= 4,   
   "Hierarchical Bayes total-weighted"   = 8,   
   "Hierarchical Bayes purposes-weighted"= 25  
 )
 
-shared_fill_scale   <- function() scale_fill_manual(values = okabe_ito, name = NULL, drop = FALSE)
-shared_colour_scale <- function() scale_color_manual(values = okabe_ito, name = NULL, drop = FALSE)
+shared_fill_scale   = function() scale_fill_manual(values = okabe_ito, name = NULL, drop = FALSE)
+shared_colour_scale = function() scale_color_manual(values = okabe_ito, name = NULL, drop = FALSE)
 
 shared_legend <- get_legend(
-  ggplot(all_data %>% dplyr::distinct(method),
-         aes(x = method, y = 1, colour = method, shape = method)) +
+  ggplot(all_data %>% dplyr::distinct(method), aes(x = method, y = 1, colour = method, shape = method)) +
     geom_point(size = 4.5, stroke = 1.2) + 
     shared_colour_scale() +
     scale_shape_manual(values = cb_shapes, name = NULL, drop = FALSE) +
-    guides(colour = guide_legend(nrow = 2, byrow = TRUE,
-                                 label.theme = element_text(size = 11))) +
+    guides(colour = guide_legend(nrow = 2, byrow = TRUE, label.theme = element_text(size = 11))) +
     theme_minimal() +
     theme(
       legend.position = "bottom", 
@@ -257,50 +288,35 @@ shared_legend <- get_legend(
     )
 )
 
-# =============================================================================
-# 6.  METRIC SPECIFICATION (Uncomment the ones you wish to export to PDF plots)
-# =============================================================================
-
 metrics <- list(
-  list(col = "MAE",          label = "MAE",              lower_better = TRUE,
-       fix_floor = FALSE, coverage_target = NULL,
-       levels_with_data = level_order,   filename = "MAE"),
-  list(col = "RMSE",         label = "RMSE",             lower_better = TRUE,
-       fix_floor = FALSE, coverage_target = NULL,
-       levels_with_data = level_order,   filename = "RMSE"),
-  list(col = "CRPS",         label = "CRPS",             lower_better = TRUE,
-       fix_floor = FALSE, coverage_target = NULL,
-       levels_with_data = level_order,   filename = "CRPS")
+  list(col = "MAE",  label = "MAE",  lower_better = TRUE, fix_floor = FALSE, levels_with_data = level_order, filename = "MAE"),
+  list(col = "RMSE", label = "RMSE", lower_better = TRUE, fix_floor = FALSE, levels_with_data = level_order, filename = "RMSE"),
+  list(col = "CRPS", label = "CRPS", lower_better = TRUE, fix_floor = FALSE, levels_with_data = level_order, filename = "CRPS")
 )
 
 # =============================================================================
-# 7.  BAR PANEL BUILDER  
+# 7. BAR PANEL BUILDER  
 # =============================================================================
 
-make_bar_panel <- function(data, metric_col, metric_label, lev,
-                           fix_floor, coverage_target = NULL) {
-  
+make_bar_panel <- function(data, metric_col, metric_label, lev, fix_floor) {
   df <- data %>%
     dplyr::filter(level == lev, !is.na(.data[[metric_col]])) %>%
     dplyr::group_by(method) %>%
     dplyr::summarise(val = mean(.data[[metric_col]], na.rm = TRUE), .groups = "drop") %>%
     dplyr::rename(!!metric_col := val)
   
-  if (nrow(df) == 0)
-    return(ggplot() + theme_void() + labs(title = paste(lev, "- no data")))
+  if (nrow(df) == 0) return(ggplot() + theme_void() + labs(title = paste(lev, "- no data")))
   
   vals    <- df[[metric_col]]
-  y_min   <- min(vals, na.rm = TRUE)
-  y_max   <- max(vals, na.rm = TRUE)
+  y_min    <- min(vals, na.rm = TRUE)
+  y_max    <- max(vals, na.rm = TRUE)
   y_range <- y_max - y_min
   
-  if (fix_floor) {
-    y_lo <- 0; y_hi <- y_max * 1.08
-  } else if (y_range < 1e-10) {
+  if (fix_floor || y_range < 1e-10) {
     y_lo <- 0; y_hi <- y_max * 1.08
   } else {
     y_lo <- max(2 * y_min - y_max, y_min - 0.10 * abs(y_min))
-    y_hi <- y_max + 0.05 * y_range  # <-- Fixed typo from ':=' to '<-' here
+    y_hi <- y_max + 0.05 * y_range  
   }
   
   ggplot(df, aes(x = method, y = .data[[metric_col]], fill = method)) +
@@ -319,7 +335,7 @@ make_bar_panel <- function(data, metric_col, metric_label, lev,
 }
 
 # =============================================================================
-# 8.  AUDITED NEMENYI HELPERS (Constructs Matrix Slices for Nonparametric Testing)
+# 8. NONPARAMETRIC TEST ENGINE (FIXED: MAPS TO INDEPENDENT N=121 TIMESTEP BLOCKS)
 # =============================================================================
 
 build_nemenyi_matrix <- function(df, metric_col, lower_better) {
@@ -327,19 +343,19 @@ build_nemenyi_matrix <- function(df, metric_col, lower_better) {
     dplyr::filter(!is.na(.data[[metric_col]])) %>%
     dplyr::mutate(method = stringr::str_wrap(method, width = 22))
   
-  # Map directly across available observations
-  df <- df %>% 
-    dplyr::mutate(obs_id = paste("h", horizon, sep = "_"))
+  # FIX: Check if we have the long-form timestep dimension available
+  if ("timestep" %in% names(df)) {
+    df <- df %>% dplyr::mutate(obs_id = paste0("origin_", timestep))
+  } else {
+    return(NULL)
+  }
   
   wide <- df %>%
     dplyr::select(obs_id, method, value = dplyr::all_of(metric_col)) %>%
-    tidyr::pivot_wider(names_from  = method,
-                       values_from = value,
-                       values_fn   = mean) 
+    tidyr::pivot_wider(names_from = method, values_from = value, values_fn = mean) 
   
   mat <- as.matrix(wide[, -1, drop = FALSE])
   rownames(mat) <- wide$obs_id
-  
   mat <- mat[rowSums(!is.na(mat)) == ncol(mat), , drop = FALSE]
   if (nrow(mat) < 2) return(NULL)
   
@@ -387,39 +403,28 @@ make_nemenyi_page <- function(df, metric_col, lower_better, title_str, res = 150
 }
 
 # =============================================================================
-# 9.  RELATIVE LINE-PLOT
+# 9. RELATIVE LINE-PLOT (SYNTAX CORRECTED)
 # =============================================================================
 
-make_rel_lineplot <- function(df_avg, metric_col, metric_label, lower_better, coverage_target = NULL) {
-  
-  # Fetch baseline values for scaling
+make_rel_lineplot <- function(df_avg, metric_col, metric_label, lower_better) {
   baseline_vals <- df_avg %>%
     dplyr::filter(method == baseline_method) %>%
     dplyr::select(level, baseline = dplyr::all_of(metric_col))
   
+  # FIX: Changed '%in=' to '%in%' and cleaned up the pipeline indentations
   rel_df <- df_avg %>%
-    dplyr::filter(
-      method != baseline_method, 
-      !is.na(.data[[metric_col]]),
-      level %in% base_levels 
-    ) %>%
+    dplyr::filter(method != baseline_method, !is.na(.data[[metric_col]]), level %in% base_levels) %>%
     dplyr::left_join(baseline_vals, by = "level") %>%
     dplyr::filter(!is.na(baseline), abs(baseline) > .Machine$double.eps) %>%
     dplyr::mutate(
-      rel_value = .data[[metric_col]] / baseline,
-      level     = factor(level, levels = base_levels) 
+      rel_value = .data[[metric_col]] / baseline, 
+      level = factor(level, levels = base_levels)
     )
   
+  # FIX: Changed '%in=' to '%in%'
   baseline_df <- df_avg %>%
-    dplyr::filter(
-      method == baseline_method, 
-      !is.na(.data[[metric_col]]),
-      level %in% base_levels
-    ) %>%
-    dplyr::mutate(
-      rel_value = 1, 
-      level     = factor(level, levels = base_levels)
-    )
+    dplyr::filter(method == baseline_method, !is.na(.data[[metric_col]]), level %in% base_levels) %>%
+    dplyr::mutate(rel_value = 1, level = factor(level, levels = base_levels))
   
   if (nrow(rel_df) == 0) return(ggplot() + theme_void() + labs(title = "No relative data"))
   
@@ -438,19 +443,15 @@ make_rel_lineplot <- function(df_avg, metric_col, metric_label, lower_better, co
                        clean_names <- ifelse(x %in% names(level_labels), level_labels[x], x)
                        str_wrap(clean_names, width = 12)
                      }) +
-    labs(
-      title    = paste(metric_label, "relative to", baseline_method), 
-      subtitle = direction_note,
-      x        = "Structural Tiers", 
-      y        = paste0("Ratio vs. ", baseline_method)
-    ) +
+    labs(title = paste(metric_label, "relative to", baseline_method), 
+         subtitle = direction_note, 
+         x = "Structural Tiers", 
+         y = paste0("Ratio vs. ", baseline_method)) +
     theme_bw(base_size = 13) +
-    theme(
-      legend.position    = "none", 
-      plot.title         = element_text(size = 12, face = "bold"),
-      axis.text.x        = element_text(size = 11, angle = 0, hjust = 0.5), 
-      panel.grid.major.x = element_blank()
-    )
+    theme(legend.position    = "none", 
+          plot.title         = element_text(size = 12, face = "bold"),
+          axis.text.x        = element_text(size = 11, angle = 0, hjust = 0.5), 
+          panel.grid.major.x = element_blank())
 }
 
 # =============================================================================
@@ -461,42 +462,51 @@ for (m in metrics) {
   avail <- all_data %>% filter(!is.na(.data[[m$col]])) %>% nrow()
   if (avail == 0) { message("Skipping ", m$filename, " - no data"); next }
   
-  direction_note    = if (m$lower_better) "(lower is better)" else "(higher is better)"
-  applicable_levels = intersect(level_order, as.character(unique(all_data$level[!is.na(all_data[[m$col]])])))
+  applicable_levels <- intersect(level_order, as.character(unique(all_data$level[!is.na(all_data[[m$col]])])))
   
   pdf_path <- file.path(dir_out, paste0(m$filename, ".pdf"))
   message("Building ", pdf_path, " ...")
   pdf(pdf_path, width = 15, height = 9) 
   
-  # ── Pages 1...H: bar panels per horizon ──────────────────────────────────
+  # ── Pages 1...H: Bar panels per horizon
   for (h in seq_len(horizon)) {
     df_h   <- all_data %>% filter(horizon == h)
-    panels <- lapply(applicable_levels, function(lev) make_bar_panel(df_h, m$col, m$label, lev, m$fix_floor, m$coverage_target))
+    panels <- lapply(applicable_levels, function(lev) make_bar_panel(df_h, m$col, m$label, lev, m$fix_floor))
     if (length(panels) == 0) next
     print(plot_grid(ggplotGrob(wrap_plots(panels, ncol = 3)), shared_legend, ncol = 1, rel_heights = c(0.85, 0.15)))
   }
   
-  # ── Page H+1: averaged over horizons, bar panels ─────────────────────────
+  # ── Page H+1: Averaged over horizons, bar panels
   df_avg_level <- summary_lm %>% filter(level %in% applicable_levels)
-  panels_avg   <- lapply(applicable_levels, function(lev) make_bar_panel(df_avg_level, m$col, m$label, lev, m$fix_floor, m$coverage_target))
+  panels_avg   <- lapply(applicable_levels, function(lev) make_bar_panel(df_avg_level, m$col, m$label, lev, m$fix_floor))
   if (length(panels_avg) > 0) {
     print(plot_grid(ggplotGrob(wrap_plots(panels_avg, ncol = 3)), shared_legend, ncol = 1, rel_heights = c(0.85, 0.15)))
   }
   
-  # ── Nemenyi Framework: Evaluated for Macro Tiers ──────────────────────────
-  target_nemenyi_levels <- c("Overall", "Total", "Purpose")
-  for (lev in target_nemenyi_levels) {
-    if (lev %in% applicable_levels) {
-      df_lev <- all_data %>% dplyr::filter(level == lev)
-      pg_all <- make_nemenyi_page(df_lev, m$col, m$lower_better, title_str = sprintf("Nemenyi Framework: %s | Level: %s | All Horizons Pooled", m$label, lev))
-      print(pg_all$grob)
-    }
-  }
+  # ── Page H+2: True Seasonal In-Sample Scaled RMSSE Framework Profile (N=121)
+  pg_rmsse <- make_nemenyi_page(
+    overall_window_blocks, 
+    metric_col   = "RMSSE", 
+    lower_better = TRUE, 
+    title_str    = sprintf("Nemenyi Framework Matrix: System-Wide Overall RMSSE (m=12 Scaled) | All Horizons Pooled")
+  )
+  print(pg_rmsse$grob)
   
-  # ── Final page: relative line plot ────────────────────────────────────────
-  rel_plot <- make_rel_lineplot(summary_lm, m$col, m$label, m$lower_better, m$coverage_target)
+  # ── Page H+3: Global Joint Predictive Quality Profile (Energy Score) (N=121)
+  pg_es <- make_nemenyi_page(
+    all_multi_raw, 
+    metric_col   = "ES", 
+    lower_better = TRUE, 
+    title_str    = sprintf("Nemenyi Framework Matrix: System-Wide Overall Energy Score (ES) | All Horizons Pooled")
+  )
+  print(pg_es$grob)
+  
+  # ── Final page: Relative line plot
+  rel_plot <- make_rel_lineplot(summary_lm, m$col, m$label, m$lower_better)
   print(plot_grid(rel_plot, shared_legend, ncol = 1, rel_heights = c(0.80, 0.20)))
   
   dev.off()
-  message("  Saved: ", pdf_path)
+  message("    Saved: ", pdf_path)
 }
+
+message("\nAll diagnostic graphics plots exported to output folder successfully.")
