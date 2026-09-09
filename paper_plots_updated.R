@@ -276,15 +276,16 @@ shared_colour_scale = function() scale_color_manual(values = okabe_ito, name = N
 
 shared_legend <- get_legend(
   ggplot(all_data %>% dplyr::distinct(method), aes(x = method, y = 1, colour = method, shape = method)) +
-    geom_point(size = 4.5, stroke = 1.2) + 
+    geom_point(size = 5, stroke = 1.5) + 
     shared_colour_scale() +
     scale_shape_manual(values = cb_shapes, name = NULL, drop = FALSE) +
-    guides(colour = guide_legend(nrow = 2, byrow = TRUE, label.theme = element_text(size = 11))) +
+    guides(colour = guide_legend(nrow = 2, byrow = TRUE, 
+                                 label.theme = element_text(size = 14))) + # Increased to 14
     theme_minimal() +
     theme(
       legend.position = "bottom", 
-      legend.key.size = unit(0.8, "cm"),
-      legend.text     = element_text(margin = margin(r = 10, l = 2))
+      legend.key.size = unit(1.0, "cm"),
+      legend.text     = element_text(margin = margin(r = 12, l = 4))
     )
 )
 
@@ -403,7 +404,7 @@ make_nemenyi_page <- function(df, metric_col, lower_better, title_str, res = 150
 }
 
 # =============================================================================
-# 9. RELATIVE LINE-PLOT (SYNTAX CORRECTED)
+# 9. RELATIVE LINE-PLOT (OPTIMIZED FOR LATEX TEXTWIDTH)
 # =============================================================================
 
 make_rel_lineplot <- function(df_avg, metric_col, metric_label, lower_better) {
@@ -411,7 +412,6 @@ make_rel_lineplot <- function(df_avg, metric_col, metric_label, lower_better) {
     dplyr::filter(method == baseline_method) %>%
     dplyr::select(level, baseline = dplyr::all_of(metric_col))
   
-  # FIX: Changed '%in=' to '%in%' and cleaned up the pipeline indentations
   rel_df <- df_avg %>%
     dplyr::filter(method != baseline_method, !is.na(.data[[metric_col]]), level %in% base_levels) %>%
     dplyr::left_join(baseline_vals, by = "level") %>%
@@ -421,7 +421,6 @@ make_rel_lineplot <- function(df_avg, metric_col, metric_label, lower_better) {
       level = factor(level, levels = base_levels)
     )
   
-  # FIX: Changed '%in=' to '%in%'
   baseline_df <- df_avg %>%
     dplyr::filter(method == baseline_method, !is.na(.data[[metric_col]]), level %in% base_levels) %>%
     dplyr::mutate(rel_value = 1, level = factor(level, levels = base_levels))
@@ -431,27 +430,33 @@ make_rel_lineplot <- function(df_avg, metric_col, metric_label, lower_better) {
   direction_note <- if (lower_better) "(< 1 is better)" else "(> 1 is better)"
   
   ggplot(mapping = aes(x = level, y = rel_value, colour = method, group = method, shape = method)) +
-    geom_hline(yintercept = 1, linetype = "dashed", colour = "grey60", linewidth = 0.5) +
-    geom_line(data  = rel_df,      linewidth = 0.9) +
-    geom_line(data  = baseline_df, linewidth = 0.9) +
-    geom_point(data = rel_df,      size = 3.0) + 
-    geom_point(data = baseline_df, size = 3.0) +
+    geom_hline(yintercept = 1, linetype = "dashed", colour = "grey50", linewidth = 0.8) +
+    geom_line(data  = rel_df,      linewidth = 1.3) +
+    geom_line(data = baseline_df, linewidth = 1.3) +
+    geom_point(data = rel_df,      size = 4.5) + 
+    geom_point(data = baseline_df, size = 4.5) +
     shared_colour_scale() +
     scale_shape_manual(values = cb_shapes, name = NULL, drop = FALSE) +
     scale_x_discrete(limits = base_levels, 
                      labels = function(x) {
                        clean_names <- ifelse(x %in% names(level_labels), level_labels[x], x)
-                       str_wrap(clean_names, width = 12)
+                       str_wrap(clean_names, width = 10)
                      }) +
     labs(title = paste(metric_label, "relative to", baseline_method), 
          subtitle = direction_note, 
          x = "Structural Tiers", 
          y = paste0("Ratio vs. ", baseline_method)) +
-    theme_bw(base_size = 13) +
+    # base_size = 18 scales everything up contextually
+    theme_bw(base_size = 18) +
     theme(legend.position    = "none", 
-          plot.title         = element_text(size = 12, face = "bold"),
-          axis.text.x        = element_text(size = 11, angle = 0, hjust = 0.5), 
-          panel.grid.major.x = element_blank())
+          plot.title         = element_text(size = 18, face = "bold", margin = margin(b = 6)),
+          plot.subtitle      = element_text(size = 14, face = "italic", margin = margin(b = 10)),
+          axis.text.x        = element_text(size = 15, color = "black"), 
+          axis.text.y        = element_text(size = 15, color = "black"),
+          axis.title.x       = element_text(size = 16, face = "bold", margin = margin(t = 12)),
+          axis.title.y       = element_text(size = 16, face = "bold", margin = margin(r = 12)),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor   = element_blank())
 }
 
 # =============================================================================
@@ -466,7 +471,12 @@ for (m in metrics) {
   
   pdf_path <- file.path(dir_out, paste0(m$filename, ".pdf"))
   message("Building ", pdf_path, " ...")
-  pdf(pdf_path, width = 15, height = 9) 
+  # Target a canvas size close to actual textwidth (e.g., 7.5 x 5 inches)
+  pdf(file.path(dir_out, "Relative_Lineplots.pdf"), width = 7.5, height = 5.0)
+  
+  # Inside your plotting function, a base_size of 12-13 will now look 
+  # exactly like 10pt body text when compiled in your LaTeX document
+  theme_bw(base_size = 13)
   
   # ── Pages 1...H: Bar panels per horizon
   for (h in seq_len(horizon)) {

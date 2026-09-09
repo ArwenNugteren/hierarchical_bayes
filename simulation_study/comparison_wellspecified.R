@@ -3,8 +3,26 @@ library(tidyr)
 library(stringr)
 
 # =============================================================================
-# 0. CONFIGURATION & PATHS
+# 0. CONFIGURATION, PATHS, & HISTORICAL CONFIGURATION
 # =============================================================================
+
+# methods <- c(
+#   "Independent Bayes - 10",
+#   "Hierarchical Bayes - 10",
+#   "Independent Bayes - 20",
+#   "Hierarchical Bayes - 20",
+#   "Independent Bayes - 50",
+#   "Hierarchical Bayes - 50"
+# )
+# 
+# folders <- c(
+#   "accuracy_wellspecified_independent10",
+#   "accuracy_wellspecified_hierarchy10",
+#   "accuracy_wellspecified_independent20",
+#   "accuracy_wellspecified_hierarchy20",
+#   "accuracy_wellspecified_joint_independentv2",
+#   "accuracy_wellspecified_joint_hierarchical_bayes"
+# )
 
 methods <- c(
   "Independent Bayes",
@@ -13,7 +31,8 @@ methods <- c(
   "Hierarchical Bayes MinT",
   "Hierarchical Bayes softer coherency",
   "Hierarchical Bayes tighter coherency",
-  "Hierarchical Bayes total-weighted"
+  "Hierarchical Bayes total-weighted",
+  "Hierarchical Bayes bottom-weighted"
 )
 
 folders <- c(
@@ -21,10 +40,29 @@ folders <- c(
   "accuracy_wellspecified_joint_independent_mintv2",
   "accuracy_wellspecified_joint_hierarchical_bayes",
   "accuracy_wellspecified_joint_hierarchical_bayes_mint",
-  "accuracy_wellspecified_joint_hierarchical_coherency1_v2",
+  "accuracy_wellspecified_joint_hierarchical_coherency1_v2_new",
   "accuracy_wellspecified_joint_hierarchical_coherency0.707v2",
-  # "accuracy_wellspecified_joint_coherency0.707_topweighted"
+  "accuracy_wellspecified_joint_coherency0.707_topweighted_v2",
+  "accuracy_wellspecified_coherency_topdownweighted"
 )
+
+# methods <- c(
+#   "Independent Bayes",
+#   "Independent Bayes MinT",
+#   "Hierarchical Bayes",
+#   "Hierarchical Bayes MinT",
+#   "Hierarchical Bayes softer coherency",
+#   "Hierarchical Bayes tighter coherency"
+# )
+# 
+# folders <- c(
+#   "accuracy_wellspecified_independent_incoherent",
+#   "accuracy_wellspecified_independent_incoherent_mint",
+#   "accuracy_wellspecified_hierarchy_incoherent",
+#   "accuracy_wellspecified_hierarchy_incoherent_mint",
+#   "accuracy_wellspecified_hierarchy_coherency1_incoherent",
+#   "accuracy_wellspecified_hierarchy_coherency0.707_incoherent"
+# )
 
 stopifnot(length(methods) == length(folders))
 
@@ -32,21 +70,58 @@ dir_out   <- "comparison_plots_wellspecified"
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
 horizon   <- 5L   
-target_hs <- c(1, 2, 3, 5) 
+target_hs <- c(1, 2, 3, 4, 5) 
 
-base_levels  <- c("Overall", "top", "mid", "bottom")
+# Structural constants matching the training configuration
+TRAIN_SIZE <- 50L
+
+# Structural tiers (Excluding "Overall" entirely from cross-sectional tables)
+base_levels  <- c("top", "mid", "bottom")
 level_labels <- c(
-  "Overall" = "Overall System",
-  "top"     = "Top Level",
-  "mid"     = "Middle Level",
-  "bottom"  = "Bottom Level"
+  "top"    = "Top Level",
+  "mid"    = "Middle Level",
+  "bottom" = "Bottom Level"
 )
 
 # =============================================================================
-# 1. LOAD RAW DATA FUNCTION (Preserves Series and Rolls for Proper RMSE)
+# 1. GENERATE TRUE IN-SAMPLE NAÏVE BASELINE SCALES FROM HISTORICAL WINDOWS
+# =============================================================================
+synthetic_data <- read.csv("synthetic_hierarchy.csv")
+colnames(synthetic_data) <- c("Total", "A", "B", "AA", "AB", "BA", "BB")
+
+# Convert to matrix for highly efficient slicing inside the rolling loop
+data_mat_raw <- as.matrix(synthetic_data)
+
+# Compute the mean squared in-sample first-differences for each training window
+# Each roll window starts at index: roll, and ends at: roll + TRAIN_SIZE - 1
+in_sample_scales <- tibble::tibble(roll = 1L:500L) %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    scale_vector = list({
+      # Extract the exact 50-step historical matrix used to train this specific roll
+      train_window <- data_mat_raw[roll:(roll + TRAIN_SIZE - 1L), ]
+      
+      # Calculate (Y_t - Y_{t-1})^2 across the training matrix
+      # diff calculates the difference between each element and the next
+      diff_sq <- diff(train_window)^2
+      
+      # Compute the mean squared error of this historical persistence baseline
+      colMeans(diff_sq, na.rm = TRUE)
+    })
+  ) %>%
+  dplyr::ungroup() %>%
+  tidyr::unnest_wider(scale_vector) %>%
+  tidyr::pivot_longer(
+    cols = -roll,
+    names_to = "series",
+    values_to = "in_sample_naive_mse"
+  )
+
+# =============================================================================
+# 2. LOAD RAW DATA FUNCTION (Merges In-Sample Scaling Constants)
 # =============================================================================
 
-load_method <- function(folder, method_name) {
+load_method <- function(folder, method_name, scale_df) {
   acc_files <- list.files(folder, pattern = "^accuracy_roll_[0-9]+\\.rds$", full.names = TRUE)
   if (length(acc_files) == 0) {
     warning("No accuracy files found in: ", folder)
@@ -65,12 +140,15 @@ load_method <- function(folder, method_name) {
   all_uni     <- dplyr::bind_rows(lapply(loaded_list, `[[`, "uni"))
   all_multi   <- dplyr::bind_rows(lapply(loaded_list, `[[`, "multi"))
   
-  # Return the granular series data with roll intact so we can compute RMSE properly downstream
+  # Inject the historical scales into the model's out-of-sample tracking frame
   uni_clean <- all_uni %>%
-    dplyr::mutate(LogS = ifelse(is.finite(logS), logS, NA_real_)) %>%
-    dplyr::select(level, series, horizon, roll, ae, se, crps, LogS, covered_90, covered_95)
+    dplyr::left_join(scale_df, by = c("roll", "series")) %>%
+    dplyr::mutate(
+      LogS = ifelse(is.finite(logS), logS, NA_real_)
+    ) %>%
+    # Explicitly retain model squared error (se) and historical base scale
+    dplyr::select(level, series, horizon, roll, ae, se, in_sample_naive_mse, crps, LogS, covered_90, covered_95)
   
-  # Multivariate metrics are global properties per roll/horizon, so we can average them here safely
   multi_clean <- all_multi %>%
     dplyr::group_by(horizon) %>%
     dplyr::summarise(
@@ -89,7 +167,7 @@ load_method <- function(folder, method_name) {
 }
 
 # =============================================================================
-# 2. INGEST DATA FROM ALL FOLDERS
+# 3. INGEST DATA FROM ALL FOLDERS
 # =============================================================================
 
 all_uni_list   <- list()
@@ -97,7 +175,8 @@ all_multi_list <- list()
 
 for (i in seq_along(folders)) {
   message("Processing folder: ", folders[i])
-  res <- load_method(folders[i], methods[i])
+  # CHANGED: Passed in_sample_scales here instead of naive_baselines
+  res <- load_method(folders[i], methods[i], in_sample_scales)
   if (!is.null(res)) {
     all_uni_list[[i]]   <- res$uni
     all_multi_list[[i]] <- res$multi
@@ -108,15 +187,20 @@ all_uni_raw   <- dplyr::bind_rows(all_uni_list)
 all_multi_raw <- dplyr::bind_rows(all_multi_list)
 
 # =============================================================================
-# 3. CRITICAL STEP: COMPUTE TRUE SERIES-LEVEL RMSE OVER ROLLING WINDOWS
+# 4. COMPUTE TRUE SERIES-LEVEL RMSE & RMSSE OVER ROLLING WINDOWS
 # =============================================================================
 
-# Step 3a: Calculate specific metrics per unique series at each horizon over all rolling windows
+# Step 4a: Calculate specific metrics per unique series at each horizon over all rolling windows
 series_horizon_metrics <- all_uni_raw %>%
   dplyr::group_by(method, level, series, horizon) %>%
   dplyr::summarise(
     Series_MAE   = mean(ae, na.rm = TRUE),
-    Series_RMSE  = sqrt(mean(se, na.rm = TRUE)), # Correct: Root of mean squared error over rolls
+    Series_MSE   = mean(se, na.rm = TRUE),
+    Series_RMSE  = sqrt(Series_MSE), 
+    
+    # TRUE RMSSE: Root of (Mean Out-of-Sample MSE / Mean In-Sample Naive MSE)
+    Series_RMSSE = sqrt(Series_MSE / ifelse(in_sample_naive_mse == 0, NA_real_, in_sample_naive_mse)),
+    
     Series_CRPS  = mean(crps, na.rm = TRUE),
     Series_LogS  = mean(LogS, na.rm = TRUE),
     Series_Cov90 = mean(covered_90, na.rm = TRUE) * 100,
@@ -124,12 +208,12 @@ series_horizon_metrics <- all_uni_raw %>%
     .groups = "drop"
   )
 
-# Step 3b: Average across all series within each specific structural level and horizon
+# Step 4b: Average across all series within each specific structural level and horizon
 level_horizon_summary <- series_horizon_metrics %>%
   dplyr::group_by(method, level, horizon) %>%
   dplyr::summarise(
     MAE   = mean(Series_MAE, na.rm = TRUE),
-    RMSE  = mean(Series_RMSE, na.rm = TRUE), # Simple average over series
+    RMSE  = mean(Series_RMSE, na.rm = TRUE), 
     CRPS  = mean(Series_CRPS, na.rm = TRUE),
     LogS  = mean(Series_LogS, na.rm = TRUE),
     Cov90 = mean(Series_Cov90, na.rm = TRUE),
@@ -137,32 +221,39 @@ level_horizon_summary <- series_horizon_metrics %>%
     .groups = "drop"
   )
 
-# Step 3c: Build the system-wide "Overall" level by averaging across all series across all levels
-overall_horizon_summary <- series_horizon_metrics %>%
-  dplyr::group_by(method, horizon) %>%
+# Step 4c: Build the scale-safe global "Overall System Table" spanning Horizons 1-5
+overall_system_summary <- series_horizon_metrics %>%
+  dplyr::group_by(method) %>%
   dplyr::summarise(
     MAE   = mean(Series_MAE, na.rm = TRUE),
-    RMSE  = mean(Series_RMSE, na.rm = TRUE), # Simple average over all series in the system
+    RMSSE = mean(Series_RMSSE, na.rm = TRUE), # Safe cross-level scale-invariant metric
     CRPS  = mean(Series_CRPS, na.rm = TRUE),
     LogS  = mean(Series_LogS, na.rm = TRUE),
     Cov90 = mean(Series_Cov90, na.rm = TRUE),
     Cov95 = mean(Series_Cov95, na.rm = TRUE),
     .groups = "drop"
-  ) %>%
-  dplyr::mutate(level = "Overall")
+  )
 
-# Combine into one master structural baseline frame
-master_horizon_summary <- dplyr::bind_rows(level_horizon_summary, overall_horizon_summary)
+# Extract and attach the global multivariate Energy Score (ES) directly 
+multivariate_global_summary <- all_multi_raw %>%
+  dplyr::group_by(method) %>%
+  dplyr::summarise(ES = mean(ES, na.rm = TRUE), .groups = "drop")
+
+overall_system_table <- overall_system_summary %>%
+  dplyr::left_join(multivariate_global_summary, by = "method") %>%
+  dplyr::mutate(Method = factor(method, levels = methods)) %>%
+  dplyr::select(Method, MAE, RMSSE, CRPS, LogS, Cov90, Cov95, ES) %>%
+  dplyr::arrange(Method)
 
 # =============================================================================
-# 4. COMPUTE LARGE HIERARCHICAL COMPREHENSIVE PERFORMANCE TABLE (Averaged Over H)
+# 5. COMPUTE COMPREHENSIVE TIERED PERFORMANCE TABLE (Excluding Overall)
 # =============================================================================
 
-univariate_macro_summary <- master_horizon_summary %>%
+univariate_macro_summary <- level_horizon_summary %>%
   dplyr::group_by(method, level) %>%
   dplyr::summarise(
     MAE   = mean(MAE, na.rm = TRUE),
-    RMSE  = mean(RMSE, na.rm = TRUE), # Simple average over horizons
+    RMSE  = mean(RMSE, na.rm = TRUE), 
     CRPS  = mean(CRPS, na.rm = TRUE),
     LogS  = mean(LogS, na.rm = TRUE),
     Cov90 = mean(Cov90, na.rm = TRUE),
@@ -170,29 +261,23 @@ univariate_macro_summary <- master_horizon_summary %>%
     .groups = "drop"
   )
 
-multivariate_global_summary <- all_multi_raw %>%
-  dplyr::group_by(method) %>%
-  dplyr::summarise(ES = mean(ES, na.rm = TRUE), .groups = "drop") %>%
-  dplyr::mutate(level = "Overall")
-
 master_spine <- expand.grid(method = methods, level = base_levels, stringsAsFactors = FALSE)
 
 comprehensive_summary_table <- master_spine %>%
   dplyr::as_tibble() %>%
   dplyr::left_join(univariate_macro_summary, by = c("method", "level")) %>%
-  dplyr::left_join(multivariate_global_summary, by = c("method", "level")) %>%
   dplyr::mutate(
     Presentation_Level = factor(level_labels[level], levels = level_labels),
     Method             = factor(method, levels = methods)
   ) %>%
   dplyr::arrange(Presentation_Level, Method) %>%
-  dplyr::select(Level = Presentation_Level, Method, MAE, RMSE, CRPS, LogS, Cov90, Cov95, ES)
+  dplyr::select(Level = Presentation_Level, Method, MAE, RMSE, CRPS, LogS, Cov90, Cov95)
 
 # =============================================================================
-# 5. SEPARATE ACCURACY SPREADS (RMSE & CRPS SEPARATED BY TIER & HORIZON)
+# 6. SEPARATE ACCURACY SPREADS (Excluding Overall)
 # =============================================================================
 
-window_aggregations <- master_horizon_summary %>%
+window_aggregations <- level_horizon_summary %>%
   dplyr::group_by(method, level) %>%
   dplyr::summarise(
     RMSE_h1_5 = mean(RMSE, na.rm = TRUE),
@@ -208,10 +293,10 @@ pivot_simulation_metrics <- function(df, column_name) {
     tidyr::pivot_wider(names_from = h_lbl, values_from = value)
 }
 
-rmse_sim_wide <- pivot_simulation_metrics(master_horizon_summary, "RMSE") %>%
+rmse_sim_wide <- pivot_simulation_metrics(level_horizon_summary, "RMSE") %>%
   dplyr::left_join(window_aggregations %>% dplyr::select(method, level, `h1-5 Avg` = RMSE_h1_5), by = c("method", "level"))
 
-crps_sim_wide <- pivot_simulation_metrics(master_horizon_summary, "CRPS") %>%
+crps_sim_wide <- pivot_simulation_metrics(level_horizon_summary, "CRPS") %>%
   dplyr::left_join(window_aggregations %>% dplyr::select(method, level, `h1-5 Avg` = CRPS_h1_5), by = c("method", "level"))
 
 format_master_sim_layout <- function(df) {
@@ -228,7 +313,7 @@ rmse_separated_table <- format_master_sim_layout(rmse_sim_wide)
 crps_separated_table <- format_master_sim_layout(crps_sim_wide)
 
 # =============================================================================
-# 6. MULTIVARIATE COHESION WIDE TABLES (MAI & JSD)
+# 7. MULTIVARIATE COHESION WIDE TABLES (MAI & JSD)
 # =============================================================================
 
 raw_cohesion_means <- all_multi_raw %>%
@@ -254,10 +339,15 @@ jsd_cohesion_wide <- raw_cohesion_means %>%
   dplyr::arrange(Method)
 
 # =============================================================================
-# 7. SYSTEM RENDER PRINT & FILE EXPORT
+# 8. SYSTEM RENDER PRINT & FILE EXPORT
 # =============================================================================
 
-cat("\n--- COMPREHENSIVE SIMULATION MATRIX BY HIERARCHICAL LEVEL ---\n")
+cat("\n--- OVERALL SCALE-SAFE SYSTEM MATRIX (HORIZONS 1-5 SUMMARY WITH RMSSE & ES) ---\n")
+overall_system_table %>%
+  dplyr::mutate(across(where(is.numeric), ~ round(.x, 4))) %>%
+  print(n = Inf)
+
+cat("\n--- COMPREHENSIVE SIMULATION MATRIX BY HIERARCHICAL TIER (EXCLUDING OVERALL) ---\n")
 comprehensive_summary_table %>%
   dplyr::mutate(across(where(is.numeric), ~ round(.x, 4))) %>%
   print(n = Inf)
@@ -283,9 +373,9 @@ jsd_cohesion_wide %>%
   print(n = Inf)
 
 # CSV File Export Sequence
+write.csv(overall_system_table,        file.path(dir_out, "overall_system_table.csv"),     row.names = FALSE)
 write.csv(comprehensive_summary_table, file.path(dir_out, "comprehensive_summary_hierarchical.csv"), row.names = FALSE)
 write.csv(rmse_separated_table,        file.path(dir_out, "separated_horizon_table_RMSE.csv"),        row.names = FALSE)
 write.csv(crps_separated_table,        file.path(dir_out, "separated_horizon_table_CRPS.csv"),        row.names = FALSE)
 write.csv(mai_cohesion_wide,           file.path(dir_out, "cohesion_wide_MAI.csv"),                  row.names = FALSE)
 write.csv(jsd_cohesion_wide,           file.path(dir_out, "cohesion_wide_JSD.csv"),                  row.names = FALSE)
-

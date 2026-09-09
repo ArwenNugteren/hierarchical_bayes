@@ -27,7 +27,13 @@ task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
 # 2.  LOAD DATA
 # =============================================================================
 
-synthetic_data <- read.csv("synthetic_hierarchy.csv")
+# regular (coherent) synthetic data
+# synthetic_data <- read.csv("synthetic_hierarchy.csv") %>%
+#   slice(-(1:30))
+
+#softly coherent (somewhat incoherent) synthetic data
+synthetic_data <- read.csv("incoherent_synthetic_hierarchy.csv")
+
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
 TRAIN_SIZE <- 50  
@@ -38,6 +44,7 @@ HORIZON    <- 5
 
 lambda_top <- 1
 lambda_mid <- 1
+lambda_bot <- 1
 sigma_coh <- sqrt(0.5)
 
 IDX <- list(total = 1L, A = 2L, B = 3L, bot = 4:7)
@@ -54,6 +61,7 @@ data {
   vector[T]    Y_A;
   vector[T]    Y_B;
   vector[T]    Y_total;
+  real<lower=0> lambda_bot;
   real<lower=0> lambda_mid;
   real<lower=0> lambda_top;
   real<lower=0> sigma_coh;
@@ -156,10 +164,10 @@ model {
   mu_beta  ~ uniform(0, 1);
 
   // Group-mean Hyperpriors (Level 1)
-  mu_alpha_A ~ normal(mu_alpha, 0.14);
-  mu_beta_A  ~ normal(mu_beta,  0.14);
-  mu_alpha_B ~ normal(mu_alpha, 0.14);
-  mu_beta_B  ~ normal(mu_beta,  0.14);
+  mu_alpha_A ~ normal(mu_alpha, 0.1);
+  mu_beta_A  ~ normal(mu_beta,  0.1);
+  mu_alpha_B ~ normal(mu_alpha, 0.1);
+  mu_beta_B  ~ normal(mu_beta,  0.1);
 
   // Bottom parameters
   for (j in 1:2) {
@@ -196,7 +204,7 @@ model {
   // ── Laplace (Double Exponential) Likelihood ───────────────────────────────
   for (t in 1:T) {
     for (j in 1:4) {
-      target += double_exponential_lpdf(e_bot[t, j] | 0, sigma_bottom[j]);
+      target += lambda_bot * double_exponential_lpdf(e_bot[t, j] | 0, sigma_bottom[j]);
     }
     target += lambda_mid * double_exponential_lpdf(e_A[t] | 0, sigma_A);
     target += lambda_mid * double_exponential_lpdf(e_B[t] | 0, sigma_B);
@@ -299,6 +307,7 @@ for (roll in roll_start:roll_end) {
     Y_A        = train[, IDX$A],
     Y_B        = train[, IDX$B],
     Y_total    = train[, IDX$total],
+    lambda_bot = lambda_bot,
     lambda_mid = lambda_mid,
     lambda_top = lambda_top, 
     sigma_coh  = sigma_coh

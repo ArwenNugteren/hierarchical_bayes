@@ -28,14 +28,21 @@ task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
 # 2.  LOAD DATA
 # =============================================================================
 
-synthetic_data <- read.csv("synthetic_hierarchy.csv")
+# regular (coherent) synthetic data
+# synthetic_data <- read.csv("synthetic_hierarchy.csv") %>%
+#   slice(-(1:30))
+
+#softly coherent (somewhat incoherent) synthetic data
+synthetic_data <- read.csv("incoherent_synthetic_hierarchy.csv")
+
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
-TRAIN_SIZE <- 50  
+TRAIN_SIZE <- 50 
 N_ROLL     <- 500
 # N_ROLL <- 1
 # task_id <- 1
 HORIZON    <- 5
+
 
 lambda_top <- 1
 lambda_mid <- 1
@@ -139,8 +146,7 @@ transformed parameters {
 }
 model {
   // ── Independent Priors for ETS Smoothing Parameters ───────────────────────
-  // Using uniform(0, 1) as a weak/flat prior matching your original limits, 
-  // or you could swap these to broad beta distributions if you want more shape.
+  // Using uniform(0, 1) as a weak/flat prior  
   alpha_bot ~ uniform(0, 1);
   beta_bot  ~ uniform(0, 1);
   

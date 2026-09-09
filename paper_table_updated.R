@@ -223,6 +223,7 @@ univariate_macro_summary <- level_horizon_summary %>%
     MAE   = mean(MAE, na.rm = TRUE),
     RMSE  = mean(RMSE, na.rm = TRUE),
     CRPS  = mean(CRPS, na.rm = TRUE),
+    LogS  = mean(LogS, na.rm = TRUE),
     Cov90 = mean(Cov90, na.rm = TRUE),
     Cov95 = mean(Cov95, na.rm = TRUE),
     .groups = "drop"
@@ -238,7 +239,7 @@ comprehensive_summary_table <- master_grid %>%
     Method             = factor(method, levels = methods)
   ) %>%
   dplyr::arrange(Presentation_Level, Method) %>%
-  dplyr::select(Level = Presentation_Level, Method, MAE, RMSE, CRPS, Cov90, Cov95)
+  dplyr::select(Level = Presentation_Level, Method, MAE, RMSE, CRPS, LogS, Cov90, Cov95)
 
 # =============================================================================
 # 7. PRINT & EXPORT FINAL DATA OUTPUT MATRICES

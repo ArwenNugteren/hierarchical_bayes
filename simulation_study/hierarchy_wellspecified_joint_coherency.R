@@ -27,7 +27,13 @@ task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
 # 2.  LOAD DATA
 # =============================================================================
 
-synthetic_data <- read.csv("synthetic_hierarchy.csv")
+# regular (coherent) synthetic data
+# synthetic_data <- read.csv("synthetic_hierarchy.csv") %>%
+#   slice(-(1:30))
+
+#softly coherent (somewhat incoherent) synthetic data
+synthetic_data <- read.csv("incoherent_synthetic_hierarchy.csv")
+
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
 TRAIN_SIZE <- 50  
@@ -36,9 +42,10 @@ N_ROLL     <- 500
 # task_id <- 1
 HORIZON    <- 5
 
-lambda_top <- 4
+lambda_top <- 1
 lambda_mid <- 1
-sigma_coh <- sqrt(0.5)
+lambda_bot <- 1
+sigma_coh <- 1
 
 IDX <- list(total = 1L, A = 2L, B = 3L, bot = 4:7)
 
@@ -54,6 +61,7 @@ data {
   vector[T]    Y_A;
   vector[T]    Y_B;
   vector[T]    Y_total;
+  real<lower=0> lambda_bot;
   real<lower=0> lambda_mid;
   real<lower=0> lambda_top;
   real<lower=0> sigma_coh;
@@ -229,9 +237,10 @@ model {
   sigma_B   ~ cauchy(0, 1);
   sigma_top ~ cauchy(0, 1);
 
-  for (t in 3:T)
-    e_bottom[t] ~ multi_normal_cholesky(rep_vector(0, 4), L_Sigma);
-
+  for (t in 3:T){
+    target += lambda_bot * multi_normal_cholesky_lpdf(e_bottom[t] | rep_vector(0, 4), L_Sigma);
+  }
+  
   for (t in 3:T) {
     target += lambda_mid * normal_lpdf(e_A[t]   | 0, sigma_A);
     target += lambda_mid * normal_lpdf(e_B[t]   | 0, sigma_B);
@@ -348,6 +357,7 @@ for (roll in roll_start:roll_end) {
     Y_A        = train[, IDX$A],
     Y_B        = train[, IDX$B],
     Y_total    = train[, IDX$total],
+    lambda_bot = lambda_bot,
     lambda_mid = lambda_mid,
     lambda_top = lambda_top, 
     sigma_coh  = sigma_coh

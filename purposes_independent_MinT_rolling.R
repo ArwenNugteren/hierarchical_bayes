@@ -77,9 +77,9 @@ horizon     <- 12
 test_set    <- 121
 origins     <- 96:(96 + test_set - 1)
 
-# task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
-# origin  <- origins[task_id]
-origin <- 186
+task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
+origin  <- origins[task_id]
+# origin <- 186
 
 train_idx <- (origin - window_size + 1):origin
 test_idx  <- (origin + 1):(origin + horizon)

@@ -1,5 +1,5 @@
 # =============================================================================
-# Bayesian Hierarchical ARMA(2,2) — rolling window evaluation (HPC version)
+# Bayesian Hierarchical ETS — rolling window evaluation (HPC version)
 # =============================================================================
 
 library(rstan)
@@ -28,7 +28,13 @@ task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
 # 2.  LOAD DATA
 # =============================================================================
 
-synthetic_data <- read.csv("synthetic_hierarchy.csv")
+# regular (coherent) synthetic data
+# synthetic_data <- read.csv("synthetic_hierarchy.csv") %>%
+#   slice(-(1:30))
+
+#softly coherent (somewhat incoherent) synthetic data
+synthetic_data <- read.csv("incoherent_synthetic_hierarchy.csv")
+
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
 TRAIN_SIZE <- 50  
@@ -155,10 +161,10 @@ model {
   mu_beta  ~ uniform(0, 1);
 
   // Group-mean Hyperpriors (Level 1)
-  mu_alpha_A ~ normal(mu_alpha, 0.14);
-  mu_beta_A  ~ normal(mu_beta,  0.14);
-  mu_alpha_B ~ normal(mu_alpha, 0.14);
-  mu_beta_B  ~ normal(mu_beta,  0.14);
+  mu_alpha_A ~ normal(mu_alpha, 0.1);
+  mu_beta_A  ~ normal(mu_beta,  0.1);
+  mu_alpha_B ~ normal(mu_alpha, 0.1);
+  mu_beta_B  ~ normal(mu_beta,  0.1);
 
   // Bottom parameters
   for (j in 1:2) {
