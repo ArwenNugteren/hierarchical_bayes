@@ -8,7 +8,23 @@ Included are the files to:
 
 
 ## Reproducing the paper
-The file `required_packages.R` installs the packages required for all files in this repository. 
+The file `required_packages.R` installs the packages required for all files in this repository. Packages and version used in writing this paper: 
+```
+> sessionInfo()
+R version 4.4.1 (2024-06-14 ucrt)
+Platform: x86_64-w64-mingw32/x64
+Running under: Windows 11 x64 (build 22631)
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] MASS_7.3-65         scoringRules_1.1.3  tidyr_1.3.1        
+ [4] fable_0.4.1         fabletools_0.5.0    tsutils_0.9.4      
+ [7] cowplot_1.2.0       patchwork_1.3.2     ggplot2_3.5.2      
+[10] rstan_2.32.7        StanHeaders_2.32.10 stringr_1.5.1      
+[13] dplyr_1.1.4
+```
 
 ### Simulation study
 All files located in the `simulation_study` folder. The folder `data` contains the generated data and true parameters. The file `synthetic_hierarchy_hierarchical_params.R` generates the raw data, and the file `incoherent_synthetic_hierarchy.R` generates the softly coherent data. The folder `prior_predictive_checks` contains the code and images in the appendix for the misspecified and wellspecified independent and hierarchical Bayesian models. 
