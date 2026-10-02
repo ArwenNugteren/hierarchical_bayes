@@ -7,3 +7,18 @@ Included are the files to:
 - compute accuracy metrics for individual trials, and those to collate the results into the tables and plots used in the paper.
 
 *notes for me*: I still need to finish this readme by actually noting which files are used for what, noting where and how to change parameters, uploading a HPC PBS script as an example, where data and cleaning files are. For the actual code, I need to go through and make sure comments are clear, and adjustable parameters are moved to the top of files. Note the computing environment, language, version and packages necessary to run the reproducibility check with their versions. Include contact information in readme, as well as the assembly date, also mention expected runtime and licences for code/data. 
+
+## Reproducing the paper
+
+### Simulation study
+All files located in the `simulation_study` folder. The folder `data` contains the generated data and true parameters. The file `synthetic_hierarchy_hierarchical_params.R` generates the raw data, and the file `incoherent_synthetic_hierarchy.R` generates the softly coherent data. 
+
+
+
+
+### Australian domestic tourism example
+
+Data, raw and processed, is found in the data folder. The file `data_prep.R` cleans up the data and cleans it into an appropriate format. The file `synthetic_hierarchy.R` generates the synthetic data. 
+
+### Prior predictive checks
+
