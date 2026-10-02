@@ -17,8 +17,22 @@ All files located in the `simulation_study` folder. The folder `data` contains t
 
 
 ### Australian domestic tourism example
+Files are in the `australian_tourism` folder. 
 
-Data, raw and processed, is found in the data folder. The file `data_prep.R` cleans up the data and cleans it into an appropriate format. The file `synthetic_hierarchy.R` generates the synthetic data. 
+Data, raw and processed, is found in the data folder. The file `data_prep.R` cleans up the data and cleans it into an appropriate format, saved as `tourism.Rdata`, which is called by all other scripts. Prior predictive checks are in the `prior_predictive_checks` folder. The scripts `prior_predictive_check_tourism_independent.R` and `prior_predictive_check_tourism_hierarchical.R` run the two prior predictive checks and saves the output images to the same folder. Both the data cleaning and prior predictive checks can be run locally on a regular laptop computer. 
 
-### Prior predictive checks
+Models are run in the files below. Each file saves fitted models and accuracy metrics locally (these are too large to upload to github).
+- `purposes_independent_MinT_rolling`: runs the Independent Bayes models and the MinT reconciled model.
+- `purposes_hierarchy_MinT_rolling`: runs the Hierarchical Bayes model and MinT reconciled version. 
+- `purposes_hierarchy_coherency_rolling`: runs coherency weighted trials. The value of `sigma_coh` can be edited to give the softer or tighter coherency penalties.
+- `purposes_hierarchy_coherency_rolling`: runs coherency weighted trials. The values of `lambda_total` can be edited to `n_rp` for the top-level weighting and `lambda_pp` can be edited to `n_rp/n_pp` for the purpose level weighting.
+
+An example PBS script, `tourism_job.pbs` for running batch jobs on HPC is provided. This script creates folders with the job name. Packages must be installed in your HPC environment first (instructions are not provided as HPC systems differ). The independent and hierarchical trials ran within 4 hours per batch on HPC, while the coherency penalised trials took up to 6 hours due to the more complex geometry of the posterior induced by penalisation. 
+
+Results are obtained by running the file `paper_tabled.R`. This creates and saves results to the folder `paper_tables`. The file `overall_results.csv` contains the RMSSE, ES and 95% coverage at the top of Table 6, while the file `level_results.csv` contains the RMSE, CRPS and 95% coverage by level in the lower part of Table 6. The file `MAI.csv` contains the results in Table 7. The tables in the appendix are calculated separately in the file `appendix_tables.R`, save to the folder `appendix_tables`, and contains results by horizon in the files `RMSSE.csv`, `ES.csv`, `RMSE.csv` and `CRPS.csv`. The file `paper_plots.R` creates the plots in the tourism data example, and saves them to a folder called `paper_plots`. This script creates a pdf per metric, containing the Nemenyi results for ES and RMSSE (Figure 3), followed by the relative line plots by level for RMSE and CRPS (Figures 4 and 5). In all of these files, the user will need to point towards the appropriate file paths for the accuracy folders (either copied over locally, or in a HPC drive). 
+
+The file `accuracy_purposes_rolling.R` runs accuracy metrics for a single trial, and the file `post_hoc_es` contains some additional files that were used due to an earlier error in energy score calculation in the model files, so energy score results were re-run post-hoc from the saved models. This error has now been rectified, but the files are retained for completeness. 
+
+
+
 
