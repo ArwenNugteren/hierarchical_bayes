@@ -8,7 +8,7 @@ Included are the files to:
 
 
 ## Reproducing the paper
-The file `required_packages.R` installs the packages required for all files in this repository. Packages and version used
+The file `required_packages.R` installs the packages required for all files in this repository. Packages and version used in writing this paper: 
 ```
 > sessionInfo()
 R version 4.4.1 (2024-06-14 ucrt)
