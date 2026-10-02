@@ -340,11 +340,8 @@ n_draws <- dim(Y_rp_sim)[1]
 message(sprintf("Extracted %d replications", n_draws))
 
 # =============================================================================
-# 6. FAN CHART OVER THE H-STEP HORIZON
+# 6. plot over training window
 # =============================================================================
-# Capping accumulation at H=12 steps instead of 96 keeps the bands in a
-# readable range, so a direct ribbon/median-vs-actual plot is legible again
-# here in a way it wasn't over the full training length.
 
 qs <- c(0.005, 0.025, 0.05, 0.25, 0.5, 0.75, 0.95, 0.975, 0.995)
 
@@ -443,6 +440,5 @@ fan_plot <- ggplot(ribbons, aes(x = t)) +
     legend.margin = margin(t = -5)
   )
 
-ggsave("prior_predictive_tourism_h12_fanchart.png", fan_plot, width = 10, height = 10, dpi = 150)
+ggsave("prior_predictive_tourism_independent.png", fan_plot, width = 10, height = 10, dpi = 150)
 
-message("Saved: prior_predictive_tourism_h12_fanchart.png")
