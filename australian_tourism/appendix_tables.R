@@ -17,6 +17,7 @@ methods <- c(
   "Hierarchical Bayes purposes-weighted"
 )
 
+# edit with your folder names for the accuracy metrics
 folders <- c(
   "accuracy_purposes_independent_v3",
   "accuracy_purposes_independent_MinT_v3",
@@ -30,7 +31,7 @@ folders <- c(
 
 stopifnot(length(methods) == length(folders))
 
-dir_out <- "comparison_plots_updated"
+dir_out <- "paper_plots"
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
 # Structural hierarchy ordering matching original raw factors (EXCLUDING "Overall")
@@ -50,7 +51,7 @@ level_labels <- c(
 # =============================================================================
 
 message("Generating dynamic in-sample seasonal baseline matrices from tourism.Rdata...")
-load("tourism.Rdata") # Loads 'tourism' frame into environment
+load("data/tourism.Rdata") # Loads 'tourism' frame into environment
 
 window_size <- 96
 test_set    <- 121
@@ -253,18 +254,18 @@ overall_es_table <- overall_es_wide %>%
 
 cat("\n--- OVERALL SYSTEM SCALE-SAFE PROFILE MATRIX: RMSSE ---\n")
 overall_rmsse_table %>% dplyr::mutate(across(where(is.numeric), ~ round(.x, 4))) %>% print(n = Inf)
-write.csv(overall_rmsse_table, file.path(dir_out, "overall_system_milestones_RMSSE.csv"), row.names = FALSE)
+write.csv(overall_rmsse_table, file.path(dir_out, "RMSSE.csv"), row.names = FALSE)
 
 cat("\n--- OVERALL SYSTEM MULTIVARIATE PROFILE MATRIX: ENERGY SCORE (ES) ---\n")
 overall_es_table %>% dplyr::mutate(across(where(is.numeric), ~ round(.x, 4))) %>% print(n = Inf)
-write.csv(overall_es_table, file.path(dir_out, "overall_system_milestones_ES.csv"), row.names = FALSE)
+write.csv(overall_es_table, file.path(dir_out, "ES.csv"), row.names = FALSE)
 
 cat("\n--- APPENDIX HORIZON TIER TABLE: RMSE (EXCLUDING OVERALL) ---\n")
 rmse_table_master %>% dplyr::mutate(across(where(is.numeric), ~ round(.x, 4))) %>% print(n = Inf)
-write.csv(rmse_table_master, file.path(dir_out, "separate_summary_table_RMSE.csv"), row.names = FALSE)
+write.csv(rmse_table_master, file.path(dir_out, "RMSE.csv"), row.names = FALSE)
 
 cat("\n--- APPENDIX HORIZON TIER TABLE: CRPS (EXCLUDING OVERALL) ---\n")
 crps_table_master %>% dplyr::mutate(across(where(is.numeric), ~ round(.x, 4))) %>% print(n = Inf)
-write.csv(crps_table_master, file.path(dir_out, "separate_summary_table_CRPS.csv"), row.names = FALSE)
+write.csv(crps_table_master, file.path(dir_out, "CRPS.csv"), row.names = FALSE)
 
 message("\nAll milestone tables restructured and exported safely.")

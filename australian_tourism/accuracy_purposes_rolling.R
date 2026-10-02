@@ -4,7 +4,7 @@ library(patchwork)
 
 # ── User-set paths ─────────────────────────────────────────────────────────────
 
-dir_accuracy <- file.path("accuracy_coherency_wasserstein_euclidean")
+dir_accuracy <- file.path("accuracy_coherency0.005")
 dir_plots    <- file.path(dir_accuracy, "plots")
 
 dir.create(dir_plots, recursive = TRUE, showWarnings = FALSE)
