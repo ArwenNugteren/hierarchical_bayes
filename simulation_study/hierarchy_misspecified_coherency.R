@@ -28,11 +28,10 @@ task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
 # =============================================================================
 
 # regular (coherent) synthetic data
-# synthetic_data <- read.csv("synthetic_hierarchy.csv") %>%
-#   slice(-(1:30))
+synthetic_data <- read.csv("data/synthetic_hierarchy.csv") 
 
-#softly coherent (somewhat incoherent) synthetic data
-synthetic_data <- read.csv("incoherent_synthetic_hierarchy.csv")
+# #softly coherent (somewhat incoherent) synthetic data
+# synthetic_data <- read.csv("data/incoherent_synthetic_hierarchy.csv")
 
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
@@ -42,6 +41,8 @@ N_ROLL     <- 500
 # task_id <- 1
 HORIZON    <- 5
 
+# edit lambda_top to 4 for top-weighted, and lambda_bot to 2 for bottom-weighted
+# edit sigma_coh to 1 for softer coherency penalty
 lambda_top <- 1
 lambda_mid <- 1
 lambda_bot <- 1

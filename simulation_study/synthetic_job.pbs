@@ -1,0 +1,15 @@
+#!/bin/bash
+#PBS -N synthetic_hierarchy
+#PBS -l select=1:ncpus=10:mem=5gb
+#PBS -l walltime=00:30:00
+#PBS -J 1-50
+#PBS -m abe
+#PBS -j oe
+
+cd $PBS_O_WORKDIR
+MASTER_JID=$(echo ${PBS_JOBID} | sed 's/\[.*$//')
+JOB_DIR=${PBS_JOBNAME}_${MASTER_JID}
+mkdir -p ${JOB_DIR}/stanfits ${JOB_DIR}/accuracy ${JOB_DIR}/logs
+conda activate wind_power
+
+Rscript hierarchy_wellspecified_joint_coherency.R ${JOB_DIR} 2> ${JOB_DIR}/logs/log_${PBS_ARRAY_INDEX}.txt

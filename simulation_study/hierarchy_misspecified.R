@@ -29,15 +29,19 @@ task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
 # =============================================================================
 
 # regular (coherent) synthetic data
-# synthetic_data <- read.csv("synthetic_hierarchy.csv") %>%
-#   slice(-(1:30))
+# synthetic_data <- read.csv("data/synthetic_hierarchy.csv")
 
-#softly coherent (somewhat incoherent) synthetic data
-synthetic_data <- read.csv("incoherent_synthetic_hierarchy.csv")
+# #softly coherent (somewhat incoherent) synthetic data
+# synthetic_data <- read.csv("data/incoherent_synthetic_hierarchy.csv")
+
+# # for editing window size, slice by 50 - no. of training obs
+# this maintains using the same test set for all
+# synthetic_data <- read.csv("data/synthetic_hierarchy.csv") %>%
+#   slice(-(1:30))
 
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
-TRAIN_SIZE <- 50  
+TRAIN_SIZE <- 50  # edit lower for window size trials
 N_ROLL     <- 500
 # N_ROLL <- 1
 # task_id <- 1
