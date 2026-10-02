@@ -31,7 +31,7 @@ folders <- c(
 
 stopifnot(length(methods) == length(folders))
 
-dir_out <- "paper_plots"
+dir_out <- "appendix_tables"
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
 # Structural hierarchy ordering matching original raw factors (EXCLUDING "Overall")
