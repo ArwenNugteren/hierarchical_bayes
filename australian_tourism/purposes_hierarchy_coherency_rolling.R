@@ -3,7 +3,7 @@ library(stringr)
 library(rstan)
 library(scoringRules)
 
-load("tourism.Rdata")
+load("data/tourism.Rdata")
 
 # ── Read job name and directories ──────────────────────────────────────────────
 
@@ -101,11 +101,12 @@ Y_total <- (Y_raw_total - Y_mean * n_rp) / Y_sd
 
 
 # weights and penalties
+# edit sigma_coh to 0.005 * n_rp for softer penalty
 lambda_total <- 1
 lambda_pp    <- 1
 lambda_sp    <- 1
 lambda_zp    <- 1
-sigma_coh    <- 0.005 * n_rp
+sigma_coh    <- 0.002 * n_rp
 
 # ── Stan model ─────────────────────────────────────────────────────────────────
 

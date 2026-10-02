@@ -4,7 +4,7 @@ library(rstan)
 library(scoringRules)
 library(Matrix)
 
-load("tourism.Rdata")
+load("data/tourism.Rdata")
 
 # ── Read job name and directories ──────────────────────────────────────────────
 

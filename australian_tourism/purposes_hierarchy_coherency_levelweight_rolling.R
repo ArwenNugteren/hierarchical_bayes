@@ -92,6 +92,8 @@ Y_total <- (Y_raw_total - Y_mean * n_rp) / Y_sd
 
 
 # weights and penalties
+# edit sigma_coh to 0.005 * n_rp for softer penalty
+# edit lambda_total to n_rp for top-level weighting
 lambda_total <- 1
 lambda_pp    <- 1*(n_rp/n_pp)
 lambda_sp    <- 1
