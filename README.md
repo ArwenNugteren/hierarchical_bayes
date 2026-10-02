@@ -6,9 +6,9 @@ Included are the files to:
 - run the tourism data models;
 - compute accuracy metrics for individual trials, and those to collate the results into the tables and plots used in the paper.
 
-*notes for me*: I still need to finish this readme by actually noting which files are used for what, noting where and how to change parameters, uploading a HPC PBS script as an example, where data and cleaning files are. For the actual code, I need to go through and make sure comments are clear, and adjustable parameters are moved to the top of files. Note the computing environment, language, version and packages necessary to run the reproducibility check with their versions. Include contact information in readme, as well as the assembly date, also mention expected runtime and licences for code/data. 
 
 ## Reproducing the paper
+The file `required_packages.R` installs the packages required for all files in this repository. 
 
 ### Simulation study
 All files located in the `simulation_study` folder. The folder `data` contains the generated data and true parameters. The file `synthetic_hierarchy_hierarchical_params.R` generates the raw data, and the file `incoherent_synthetic_hierarchy.R` generates the softly coherent data. The folder `prior_predictive_checks` contains the code and images in the appendix for the misspecified and wellspecified independent and hierarchical Bayesian models. 
@@ -27,7 +27,7 @@ The file `accuracy_synthetic.R` can be used to obtain the accuracy results for a
 
 
 ### Australian domestic tourism example
-Files are in the `australian_tourism` folder. 
+Files are in the `australian_tourism` folder. This dataset is originally obtained from the data in the paper of Wickramasuriya et al. (2019). 
 
 Data, raw and processed, is found in the data folder. The file `data_prep.R` cleans up the data and cleans it into an appropriate format, saved as `tourism.Rdata`, which is called by all other scripts. Prior predictive checks are in the `prior_predictive_checks` folder. The scripts `prior_predictive_check_tourism_independent.R` and `prior_predictive_check_tourism_hierarchical.R` run the two prior predictive checks and saves the output images to the same folder. Both the data cleaning and prior predictive checks can be run locally on a regular laptop computer. 
 
@@ -45,4 +45,8 @@ The file `accuracy_purposes_rolling.R` runs accuracy metrics for a single trial,
 
 
 Corresponding author for queries on this repository is Arwen Nugteren, email: a.nugteren@qut.edu.au
+This repository last edited 2nd October 2026. 
+
+### References
+Wickramasuriya, S.L., Athanasopoulos, G., Hyndman, R.J., 2019. Optimal forecast reconciliation for hierarchical and grouped time series through trace minimization. Journal of the American Statistical Association 114, 804–819. doi:10.1080/01621459.2018.1448825
 
