@@ -6,24 +6,6 @@ library(stringr)
 # 0. CONFIGURATION, PATHS, & HISTORICAL CONFIGURATION
 # =============================================================================
 
-# methods <- c(
-#   "Independent Bayes - 10",
-#   "Hierarchical Bayes - 10",
-#   "Independent Bayes - 20",
-#   "Hierarchical Bayes - 20",
-#   "Independent Bayes - 50",
-#   "Hierarchical Bayes - 50"
-# )
-# 
-# folders <- c(
-#   "accuracy_wellspecified_independent10",
-#   "accuracy_wellspecified_hierarchy10",
-#   "accuracy_wellspecified_independent20",
-#   "accuracy_wellspecified_hierarchy20",
-#   "accuracy_wellspecified_joint_independentv2",
-#   "accuracy_wellspecified_joint_hierarchical_bayes"
-# )
-
 methods <- c(
   "Independent Bayes",
   "Independent Bayes MinT",
@@ -46,27 +28,41 @@ folders <- c(
   "accuracy_wellspecified_coherency_topdownweighted"
 )
 
+
+#### alternative inputs for the training window data. 
 # methods <- c(
-#   "Independent Bayes",
-#   "Independent Bayes MinT",
-#   "Hierarchical Bayes",
-#   "Hierarchical Bayes MinT",
-#   "Hierarchical Bayes softer coherency",
-#   "Hierarchical Bayes tighter coherency"
+#   "Independent Bayes - 10",
+#   # "Independent Bayes MinT - 10",
+#   "Hierarchical Bayes - 10",
+#   # "Hierarchical Bayes MinT - 10",
+#   "Independent Bayes - 20",
+#   # "Independent Bayes MinT - 20",
+#   "Hierarchical Bayes - 20",
+#   # "Hierarchical Bayes MinT - 20",
+#   "Independent Bayes - 50",
+#   # "Independent Bayes MinT - 50",
+#   "Hierarchical Bayes - 50"
+#   # "Hierarchical Bayes MinT - 50"
 # )
 # 
 # folders <- c(
-#   "accuracy_wellspecified_independent_incoherent",
-#   "accuracy_wellspecified_independent_incoherent_mint",
-#   "accuracy_wellspecified_hierarchy_incoherent",
-#   "accuracy_wellspecified_hierarchy_incoherent_mint",
-#   "accuracy_wellspecified_hierarchy_coherency1_incoherent",
-#   "accuracy_wellspecified_hierarchy_coherency0.707_incoherent"
+#   "accuracy_misspecified_independent10",
+#   # "accuracy_misspecified_independent10_mint",
+#   "accuracy_misspecified_hierarchy10",
+#   # "accuracy_misspecified_hierarchy10_mint",
+#   "accuracy_misspecified_independent20",
+#   # "accuracy_misspecified_independent20_mint",
+#   "accuracy_misspecified_hierarchy20",
+#   # "accuracy_misspecified_hierarchy20_mint",
+#   "accuracy_misspecified_independent_v2",
+#   # "accuracy_misspecified_independent_mint_v2",
+#   "accuracy_misspecified_hierarchical_v3"
+#   # "accuracy_misspecified_hierarchical_mint_v2"
 # )
 
 stopifnot(length(methods) == length(folders))
 
-dir_out   <- "comparison_plots_wellspecified"
+dir_out   <- "tables_wellspecified"
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
 horizon   <- 5L   
@@ -86,7 +82,7 @@ level_labels <- c(
 # =============================================================================
 # 1. GENERATE TRUE IN-SAMPLE NAÏVE BASELINE SCALES FROM HISTORICAL WINDOWS
 # =============================================================================
-synthetic_data <- read.csv("synthetic_hierarchy.csv")
+synthetic_data <- read.csv("data/synthetic_hierarchy.csv")
 colnames(synthetic_data) <- c("Total", "A", "B", "AA", "AB", "BA", "BB")
 
 # Convert to matrix for highly efficient slicing inside the rolling loop
@@ -373,9 +369,9 @@ jsd_cohesion_wide %>%
   print(n = Inf)
 
 # CSV File Export Sequence
-write.csv(overall_system_table,        file.path(dir_out, "overall_system_table.csv"),     row.names = FALSE)
-write.csv(comprehensive_summary_table, file.path(dir_out, "comprehensive_summary_hierarchical.csv"), row.names = FALSE)
-write.csv(rmse_separated_table,        file.path(dir_out, "separated_horizon_table_RMSE.csv"),        row.names = FALSE)
-write.csv(crps_separated_table,        file.path(dir_out, "separated_horizon_table_CRPS.csv"),        row.names = FALSE)
-write.csv(mai_cohesion_wide,           file.path(dir_out, "cohesion_wide_MAI.csv"),                  row.names = FALSE)
-write.csv(jsd_cohesion_wide,           file.path(dir_out, "cohesion_wide_JSD.csv"),                  row.names = FALSE)
+write.csv(overall_system_table,        file.path(dir_out, "overall_table.csv"),     row.names = FALSE)
+write.csv(comprehensive_summary_table, file.path(dir_out, "results_level_table.csv"), row.names = FALSE)
+# write.csv(rmse_separated_table,        file.path(dir_out, "separated_horizon_table_RMSE.csv"),        row.names = FALSE)
+# write.csv(crps_separated_table,        file.path(dir_out, "separated_horizon_table_CRPS.csv"),        row.names = FALSE)
+write.csv(mai_cohesion_wide,           file.path(dir_out, "MAI.csv"),                  row.names = FALSE)
+# write.csv(jsd_cohesion_wide,           file.path(dir_out, "cohesion_wide_JSD.csv"),                  row.names = FALSE)
