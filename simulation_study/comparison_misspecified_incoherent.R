@@ -26,13 +26,13 @@ folders <- c(
 
 stopifnot(length(methods) == length(folders))
 
-dir_out   <- "comparison_plots_missspecified_incoherent2"
+dir_out   <- "results_misspecified_incoherent"
 dir.create(dir_out, recursive = TRUE, showWarnings = FALSE)
 
 horizon   <- 5L   
 target_hs <- c(1, 2, 3, 4, 5) 
 
-# Structural constants matching the training configuration
+# used to compare with the appropriate training window
 TRAIN_SIZE <- 50L
 
 # Structural tiers (Excluding "Overall" entirely from cross-sectional tables)
@@ -46,7 +46,7 @@ level_labels <- c(
 # =============================================================================
 # 1. GENERATE TRUE IN-SAMPLE NAÏVE BASELINE SCALES FROM HISTORICAL WINDOWS
 # =============================================================================
-synthetic_data <- read.csv("synthetic_hierarchy.csv")
+synthetic_data <- read.csv("data/incoherent_synthetic_hierarchy.csv")
 colnames(synthetic_data) <- c("Total", "A", "B", "AA", "AB", "BA", "BB")
 
 # Convert to matrix for highly efficient slicing inside the rolling loop
@@ -366,9 +366,9 @@ jsd_cohesion_wide %>%
   print(n = Inf)
 
 # CSV File Export Sequence
-write.csv(overall_system_table,        file.path(dir_out, "overall_system_table.csv"),     row.names = FALSE)
-write.csv(comprehensive_summary_table, file.path(dir_out, "comprehensive_summary_hierarchical.csv"), row.names = FALSE)
-write.csv(rmse_separated_table,        file.path(dir_out, "separated_horizon_table_RMSE.csv"),        row.names = FALSE)
-write.csv(crps_separated_table,        file.path(dir_out, "separated_horizon_table_CRPS.csv"),        row.names = FALSE)
-write.csv(mai_cohesion_wide,           file.path(dir_out, "cohesion_wide_MAI.csv"),                  row.names = FALSE)
-write.csv(jsd_cohesion_wide,           file.path(dir_out, "cohesion_wide_JSD.csv"),                  row.names = FALSE)
+write.csv(overall_system_table,        file.path(dir_out, "overall_accuracy_table.csv"),     row.names = FALSE)
+# write.csv(comprehensive_summary_table, file.path(dir_out, "comprehensive_summary_hierarchical.csv"), row.names = FALSE)
+# write.csv(rmse_separated_table,        file.path(dir_out, "separated_horizon_table_RMSE.csv"),        row.names = FALSE)
+# write.csv(crps_separated_table,        file.path(dir_out, "separated_horizon_table_CRPS.csv"),        row.names = FALSE)
+write.csv(mai_cohesion_wide,           file.path(dir_out, "MAI.csv"),                  row.names = FALSE)
+# write.csv(jsd_cohesion_wide,           file.path(dir_out, "cohesion_wide_JSD.csv"),                  row.names = FALSE)
