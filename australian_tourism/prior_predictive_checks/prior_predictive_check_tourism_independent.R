@@ -440,5 +440,5 @@ fan_plot <- ggplot(ribbons, aes(x = t)) +
     legend.margin = margin(t = -5)
   )
 
-ggsave("prior_predictive_tourism_independent.png", fan_plot, width = 10, height = 10, dpi = 150)
+ggsave("prior_predictive_checks/prior_predictive_tourism_independent.png", fan_plot, width = 10, height = 10, dpi = 150)
 
