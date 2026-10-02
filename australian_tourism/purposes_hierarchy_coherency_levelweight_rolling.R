@@ -3,7 +3,7 @@ library(stringr)
 library(rstan)
 library(scoringRules)
 
-load("tourism.Rdata")
+load("data/tourism.Rdata")
 
 # ── Read job name and directories ──────────────────────────────────────────────
 
