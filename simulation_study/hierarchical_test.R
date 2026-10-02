@@ -29,7 +29,7 @@ for (d in c(dir_accuracy, dir_stanfits))
 synthetic_data <- read.csv("synthetic_hierarchy.csv")
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
-TRAIN_SIZE <- 100  
+TRAIN_SIZE <- 50  
 # N_ROLL     <- 500
 N_ROLL <- 1
 task_id <- 1
@@ -251,8 +251,8 @@ stanFit <- sampling(
   data    = stan_data,
   seed    = 2025,
   chains  = 10,
-  iter    = 200,
-  warmup  = 100,
+  iter    = 2000,
+  warmup  = 1000,
   cores   = 10,
   refresh = 0
 )

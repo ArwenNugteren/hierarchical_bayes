@@ -29,7 +29,7 @@ for (d in c(dir_accuracy, dir_stanfits))
 synthetic_data <- read.csv("synthetic_hierarchy.csv")
 data_mat       <- as.matrix(synthetic_data)   # columns: [Total, A, B, AA, AB, BA, BB]
 
-TRAIN_SIZE <- 100  
+TRAIN_SIZE <- 50  
 # N_ROLL     <- 500
 N_ROLL <- 1
 task_id <- 1
@@ -37,7 +37,7 @@ HORIZON    <- 5
 
 lambda_top <- 1
 lambda_mid <- 1
-sigma_coh <- 1
+sigma_coh <- sqrt(0.5)
 
 IDX <- list(total = 1L, A = 2L, B = 3L, bot = 4:7)
 
@@ -176,15 +176,15 @@ model {
   mu_theta2     ~ uniform(-1, 1);
   mu_theta1_raw ~ uniform(-1, 1);
 
-  mu_phi2_A       ~ normal(mu_phi2,       0.14);
-  mu_phi1_raw_A   ~ normal(mu_phi1_raw,   0.14);
-  mu_theta2_A     ~ normal(mu_theta2,     0.14);
-  mu_theta1_raw_A ~ normal(mu_theta1_raw, 0.14);
+  mu_phi2_A       ~ normal(mu_phi2,       0.1);
+  mu_phi1_raw_A   ~ normal(mu_phi1_raw,   0.1);
+  mu_theta2_A     ~ normal(mu_theta2,     0.1);
+  mu_theta1_raw_A ~ normal(mu_theta1_raw, 0.1);
 
-  mu_phi2_B       ~ normal(mu_phi2,       0.14);
-  mu_phi1_raw_B   ~ normal(mu_phi1_raw,   0.14);
-  mu_theta2_B     ~ normal(mu_theta2,     0.14);
-  mu_theta1_raw_B ~ normal(mu_theta1_raw, 0.14);
+  mu_phi2_B       ~ normal(mu_phi2,       0.1);
+  mu_phi1_raw_B   ~ normal(mu_phi1_raw,   0.1);
+  mu_theta2_B     ~ normal(mu_theta2,     0.1);
+  mu_theta1_raw_B ~ normal(mu_theta1_raw, 0.1);
 
   phi2_bot[1]       ~ normal(mu_phi2_A,       0.1);
   phi1_raw_bot[1]   ~ normal(mu_phi1_raw_A,   0.1);
@@ -340,6 +340,7 @@ stan_data <- list(
   sigma_coh  = sigma_coh
 )
 
+start_time <- Sys.time()
 stanFit <- sampling(
   object  = stanDso,
   data    = stan_data,
@@ -350,6 +351,8 @@ stanFit <- sampling(
   cores   = 10,
   refresh = 0
 )
+end_time <- Sys.time()
+print(end_time - start_time)
 
 # cat("Max Rhat:  ", max(summary(stanFit)$summary[, "Rhat"],  na.rm = TRUE), "\n")
 # cat("Min n_eff: ", min(summary(stanFit)$summary[, "n_eff"], na.rm = TRUE), "\n")
