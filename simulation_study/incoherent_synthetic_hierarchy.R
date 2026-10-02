@@ -1,5 +1,5 @@
 # read in original data
-synthetic_data <- read.csv("synthetic_hierarchy.csv")
+synthetic_data <- read.csv("data/synthetic_hierarchy.csv")
 
 # add noise to all levels/series so that the noise is roughly within +/- 5%
 # of each series' range. We treat +/- 3 SD as corresponding to that 5%
@@ -24,4 +24,4 @@ for (col in names(synthetic_data)) {
 
 # save the resulting (now incoherent, since noise is added independently
 # per series/row rather than respecting the aggregation structure) dataset
-write.csv(noisy_data, "incoherent_synthetic_hierarchy.csv", row.names = FALSE)
+write.csv(noisy_data, "data/incoherent_synthetic_hierarchy.csv", row.names = FALSE)

@@ -212,6 +212,6 @@ synthetic_data <- generate_smooth(
 # 6.  SAVE
 # =============================================================================
 
-write.csv(synthetic_data, file = "synthetic_hierarchy.csv", row.names = FALSE)
+write.csv(synthetic_data, file = "data/synthetic_hierarchy.csv", row.names = FALSE)
 save(series_coefs, group_means, grand_means, Sigma_bottom,
-     file = "true_params.Rdata")
+     file = "data/true_params.Rdata")
