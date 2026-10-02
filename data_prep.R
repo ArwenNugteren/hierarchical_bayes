@@ -1,9 +1,10 @@
 library(fable)
 library(dplyr)
 library(stringr)
+library(tidyr)
 
 ### load in data
-tourism_bottom <- read.csv("tourism_data.csv")
+tourism_bottom <- read.csv("data/tourism_data.csv")
 
 # Get all bottom-level series (excluding Year and Month)
 series_cols <- setdiff(names(tourism_bottom), c("Year", "Month"))
@@ -57,6 +58,10 @@ tourism <- tourism_bottom %>%
     df
   }
 
+states  <- unique(str_extract(series_cols, "^[A-Z]"))
+zones   <- unique(str_extract(series_cols, "^[A-Z]{2}"))
+regions <- unique(str_extract(series_cols, "^[A-Z]{3}"))
+
 # ── Level 2b: State totals (across all purposes) ─────────────────────────────
 for (state in states) {
   col_name <- state
@@ -83,10 +88,6 @@ purposes <- c("Hol", "Vis", "Bus", "Oth")
 lvl0 <- "Total"
 lvl1 <- paste0("Total", purposes)
 
-states  <- unique(str_extract(series_cols, "^[A-Z]"))
-zones   <- unique(str_extract(series_cols, "^[A-Z]{2}"))
-regions <- unique(str_extract(series_cols, "^[A-Z]{3}"))
-
 # For each level, put the aggregate total first, then the four purpose splits
 lvl2 <- as.vector(sapply(states,  function(s) c(s, paste0(s, purposes))))
 lvl3 <- as.vector(sapply(zones,   function(z) c(z, paste0(z, purposes))))
@@ -96,11 +97,12 @@ ordered_cols <- c("Year", "Month", lvl0, lvl1, lvl2, lvl3, lvl4)
 
 tourism <- tourism[, ordered_cols]
 
-# replace NA years by back-filling and make a single time column
+# replace NA years (as year is only listed with the january column) 
+# and make a single time column
 tourism <- tourism %>%
   fill(Year, .direction="down") %>%
   mutate(Month = paste0(Year, "_", Month)) %>%
   rename(Date = Month) %>%
   select(-Year)
 
-save(tourism, file="tourism.Rdata")
+save(tourism, file="data/tourism.Rdata")
