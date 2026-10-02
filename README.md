@@ -44,5 +44,5 @@ Results are obtained by running the file `paper_tables.R`. This creates and save
 The file `accuracy_purposes_rolling.R` runs accuracy metrics for a single trial, and the file `post_hoc_es` contains some additional files that were used due to an earlier error in energy score calculation in the model files, so energy score results were re-run post-hoc from the saved models. This error has now been rectified, but the files are retained for completeness. 
 
 
-
+Corresponding author for queries on this repository is Arwen Nugteren, email: a.nugteren@qut.edu.au
 
