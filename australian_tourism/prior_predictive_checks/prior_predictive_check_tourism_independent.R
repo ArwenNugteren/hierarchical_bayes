@@ -11,7 +11,7 @@ library(stringr)
 library(rstan)
 library(ggplot2)
 
-load("tourism.Rdata")
+load("data/tourism.Rdata")
 
 # =============================================================================
 # 1. SERIES IDENTIFICATION (identical to the fitting script)
@@ -47,32 +47,21 @@ message(sprintf("rp_per_pp range: %d - %d (constant means one pp node is enough)
 # zp / sp: l0/s0 prior scale depends on rp_per_zp / rp_per_sp, which vary
 # node-to-node, so we take the smallest- and largest-aggregation nodes to
 # span the range rather than picking one arbitrarily.
+
 set.seed(2025)
+rp_chk_idx <- sample(1:n_rp, 1)
+pp_chk_idx <- sample(1:n_pp, 1)
+zp_chk_idx <- sample(1:n_zp, 1)
+sp_chk_idx <- sample(1:n_sp, 1)
+# zp_chk_idx <- c(which.min(rp_per_zp), which.max(rp_per_zp))
+# sp_chk_idx <- c(which.min(rp_per_sp), which.max(rp_per_sp))
 
-pick1 <- function(x) if (length(x) == 1) x else sample(x, 1)
-
-purpose <- str_extract(sp_codes, "(Hol|Vis|Bus|Oth)$")
-sp_to_pp <- match(paste0("Total", purpose), pp_codes)   # purpose-only match — no letter prefix
-zp_to_sp <- match(paste0(substr(zp_codes, 1, 1), str_extract(zp_codes, "(Hol|Vis|Bus|Oth)$")), sp_codes)
-
-pp_chk_idx <- pick1(1:n_pp)
-
-sp_children <- which(sp_to_pp == pp_chk_idx)
-sp_chk_idx  <- pick1(sp_children)
-
-zp_children <- which(zp_to_sp == sp_chk_idx)
-zp_chk_idx  <- pick1(zp_children)
-
-rp_children <- which(rp_to_zp == zp_chk_idx)
-rp_chk_idx  <- if (length(rp_children) >= 2) sample(rp_children, 2) else rp_children
-
-sp_to_pp_chk <- 1L
-zp_to_sp_chk <- 1L
-rp_to_zp_chk <- rep(1L, length(rp_chk_idx))
-
-message(sprintf("Chain: pp=%s -> sp=%s -> zp=%s -> rp={%s}",
-                pp_codes[pp_chk_idx], sp_codes[sp_chk_idx], zp_codes[zp_chk_idx],
-                paste(rp_codes[rp_chk_idx], collapse = ", ")))
+message(sprintf("Representative zp nodes: %s (rp_per_zp = %s)",
+                paste(zp_codes[zp_chk_idx], collapse = ", "),
+                paste(rp_per_zp[zp_chk_idx], collapse = ", ")))
+message(sprintf("Representative sp nodes: %s (rp_per_sp = %s)",
+                paste(sp_codes[sp_chk_idx], collapse = ", "),
+                paste(rp_per_sp[sp_chk_idx], collapse = ", ")))
 
 # =============================================================================
 # 3. STANDARDIZE REAL DATA (same convention as the fitting script)
@@ -88,7 +77,7 @@ window_size <- 96
 m           <- 12L
 train_idx   <- 1:window_size    # representative window; swap in a real `origin` if you want a specific one
 
-H <- 96L    # steps ahead to simulate for the prior predictive check
+H <- 96L    # how many prior predictive observations to generate
 
 Y_mean <- mean(Y_raw_rp[train_idx, ])
 Y_sd   <- sd(Y_raw_rp[train_idx, ])
@@ -113,44 +102,22 @@ Y_total_std <- (Y_raw_total[train_idx] - Y_mean * n_rp) / Y_sd
 model_string <- "
 
 data {
-  int<lower=1> T;
-  int<lower=1> m;
+  int<lower=1> T;              // length of the simulated check series (match window_size)
+  int<lower=1> m;              // seasonal period
 
-  int<lower=1> n_pp_chk;
-  int<lower=1> n_sp_chk;
-  int<lower=1> n_zp_chk;
-  int<lower=1> n_rp_chk;
-
-  // mapping *within the representative subtree* (not the full tree) —
-  // e.g. sp_to_pp_chk[1] = 1 means the one sp node's parent is pp_chk[1]
-  array[n_sp_chk] int<lower=1, upper=n_pp_chk> sp_to_pp_chk;
-  array[n_zp_chk] int<lower=1, upper=n_sp_chk> zp_to_sp_chk;
-  array[n_rp_chk] int<lower=1, upper=n_zp_chk> rp_to_zp_chk;
-
-  // l0/s0 prior scale still depends on how many rp roll up into each node
-  array[n_pp_chk] int<lower=1> rp_per_pp_chk;
-  array[n_sp_chk] int<lower=1> rp_per_sp_chk;
+  int<lower=1> n_rp_chk;                              // representative rp nodes (1 is enough — fully exchangeable)
+  int<lower=1> n_zp_chk;                               // representative zp nodes (span rp_per_zp range)
   array[n_zp_chk] int<lower=1> rp_per_zp_chk;
+  int<lower=1> n_sp_chk;                               // representative sp nodes (span rp_per_sp range)
+  array[n_sp_chk] int<lower=1> rp_per_sp_chk;
+  int<lower=1> n_pp_chk;                               // representative pp nodes (1 is enough if rp_per_pp is constant)
+  array[n_pp_chk] int<lower=1> rp_per_pp_chk;
 
-  int<lower=1> n_rp_total;   // total rp count in the FULL hierarchy
+  int<lower=1> n_rp_total;     // total rp count in the FULL hierarchy — sets the total-level prior scale
 }
 
 parameters {
-  // ── Global hyper-means ──────────────────────────────────────────────────
-  real<lower=0, upper=1> mu_alpha;
-  real<lower=0, upper=1> mu_gamma_raw;
-
-  // ── Level-specific hyper-means (each shrinks toward its parent's) ───────
-  vector<lower=0, upper=1>[n_pp_chk] mu_alpha_pp;
-  vector<lower=0, upper=1>[n_pp_chk] mu_gamma_raw_pp;
-
-  vector<lower=0, upper=1>[n_sp_chk] mu_alpha_sp;
-  vector<lower=0, upper=1>[n_sp_chk] mu_gamma_raw_sp;
-
-  vector<lower=0, upper=1>[n_zp_chk] mu_alpha_zp;
-  vector<lower=0, upper=1>[n_zp_chk] mu_gamma_raw_zp;
-
-  // ── Region×purpose (bottom) ──────────────────────────────────────────────
+  // ── Region×purpose (bottom) ────────────────────────────────────────────────
   vector<lower=0, upper=1>[n_rp_chk] alpha_rp;
   vector<lower=0, upper=1>[n_rp_chk] gamma_raw_rp;
   vector<lower=0>[n_rp_chk]          sigma_rp;
@@ -214,57 +181,27 @@ transformed parameters {
 }
 
 model {
-  // ── Same hyperprior chain as the fitting model, restricted to the
-  //    representative subtree via the *_chk mapping arrays ────────────────
-  mu_alpha     ~ uniform(0, 1);
-  mu_gamma_raw ~ uniform(0, 1);
+  // ── Independent priors, identical in form to the fitting model ───────────
+  alpha_rp     ~ uniform(0, 1);
+  gamma_raw_rp ~ uniform(0, 1);
+  alpha_zp     ~ uniform(0, 1);
+  gamma_raw_zp ~ uniform(0, 1);
+  alpha_sp     ~ uniform(0, 1);
+  gamma_raw_sp ~ uniform(0, 1);
+  alpha_pp     ~ uniform(0, 1);
+  gamma_raw_pp ~ uniform(0, 1);
+  alpha_total     ~ uniform(0, 1);
+  gamma_raw_total ~ uniform(0, 1);
 
-  mu_alpha_pp     ~ normal(mu_alpha,     0.1);
-  mu_gamma_raw_pp ~ normal(mu_gamma_raw, 0.1);
+  sigma_rp    ~ cauchy(0, 0.3);
+  sigma_zp    ~ cauchy(0, 0.3);
+  sigma_sp    ~ cauchy(0, 0.5);
+  sigma_pp    ~ cauchy(0, 0.5);
+  sigma_total ~ cauchy(0, 1);
 
-  for (n in 1:n_sp_chk) {
-    int p = sp_to_pp_chk[n];
-    mu_alpha_sp[n]     ~ normal(mu_alpha_pp[p],     0.1);
-    mu_gamma_raw_sp[n] ~ normal(mu_gamma_raw_pp[p], 0.1);
-  }
-  for (n in 1:n_zp_chk) {
-    int s = zp_to_sp_chk[n];
-    mu_alpha_zp[n]     ~ normal(mu_alpha_sp[s],     0.1);
-    mu_gamma_raw_zp[n] ~ normal(mu_gamma_raw_sp[s], 0.1);
-  }
-
-  alpha_total     ~ normal(mu_alpha,     0.1);
-  gamma_raw_total ~ normal(mu_gamma_raw, 0.1);
-  sigma_total     ~ cauchy(0, 1);
-
-  for (n in 1:n_pp_chk) {
-    alpha_pp[n]     ~ normal(mu_alpha_pp[n],     0.1);
-    gamma_raw_pp[n] ~ normal(mu_gamma_raw_pp[n], 0.1);
-  }
-  sigma_pp ~ cauchy(0, 0.5);
-
-  for (n in 1:n_sp_chk) {
-    int p = sp_to_pp_chk[n];
-    alpha_sp[n]     ~ normal(mu_alpha_pp[p],     0.1);
-    gamma_raw_sp[n] ~ normal(mu_gamma_raw_pp[p], 0.1);
-  }
-  sigma_sp ~ cauchy(0, 0.5);
-
-  for (n in 1:n_zp_chk) {
-    int s = zp_to_sp_chk[n];
-    alpha_zp[n]     ~ normal(mu_alpha_sp[s],     0.1);
-    gamma_raw_zp[n] ~ normal(mu_gamma_raw_sp[s], 0.1);
-  }
-  sigma_zp ~ cauchy(0, 0.3);
-
-  for (n in 1:n_rp_chk) {
-    int z = rp_to_zp_chk[n];
-    alpha_rp[n]     ~ normal(mu_alpha_zp[z],     0.1);
-    gamma_raw_rp[n] ~ normal(mu_gamma_raw_zp[z], 0.1);
-  }
-  sigma_rp ~ cauchy(0, 0.3);
-
-  // ── l0/s0 priors, identical in form to the fitting model ─────────────────
+  // l0/s0 scale with how many rp series roll up into each node — this is
+  // exactly why representative zp/sp nodes need to span the rp_per_* range
+  // rather than being picked arbitrarily.
   l0_rp ~ normal(0, 1);
   to_vector(s0_rp_free) ~ normal(0, 1);
   for (n in 1:n_zp_chk) { l0_zp[n] ~ normal(0, rp_per_zp_chk[n]); s0_zp_free[n] ~ normal(0, rp_per_zp_chk[n]); }
@@ -281,9 +218,12 @@ generated quantities {
   matrix[T, n_pp_chk] Y_pp_sim;
   vector[T]           Y_total_sim;
 
-  // Same forward recursion as the independent-model PPC — the hierarchy
-  // only affects how alpha/gamma/sigma/l0/s0 are drawn, not how a series
-  // evolves once its own parameters are fixed.
+  // Forward recursion, derived by solving the fitting model's update
+  // equations for Y instead of for e:
+  //   e[i]    ~ Normal(0, sigma)
+  //   Y[i]    = l[i] + s[i] + e[i]
+  //   l[i+1]  = l[i] + alpha * e[i]
+  //   s[i+m]  = s[i] + gamma * e[i]
 
   for (n in 1:n_rp_chk) {
     vector[T + 1] l_sim;
@@ -357,13 +297,10 @@ ppc_model <- stan_model(model_code = model_string)
 ppc_data <- list(
   T = H,
   m = m,
-  n_pp_chk = 1L, n_sp_chk = 1L, n_zp_chk = 1L, n_rp_chk = length(rp_chk_idx),
-  sp_to_pp_chk = as.array(sp_to_pp_chk),
-  zp_to_sp_chk = as.array(zp_to_sp_chk),
-  rp_to_zp_chk = as.array(rp_to_zp_chk),
-  rp_per_pp_chk = as.array(rp_per_pp[pp_chk_idx]),
-  rp_per_sp_chk = as.array(rp_per_sp[sp_chk_idx]),
-  rp_per_zp_chk = as.array(rp_per_zp[zp_chk_idx]),
+  n_rp_chk = length(rp_chk_idx),
+  n_zp_chk = length(zp_chk_idx), rp_per_zp_chk = as.array(rp_per_zp[zp_chk_idx]),
+  n_sp_chk = length(sp_chk_idx), rp_per_sp_chk = as.array(rp_per_sp[sp_chk_idx]),
+  n_pp_chk = length(pp_chk_idx), rp_per_pp_chk = as.array(rp_per_pp[pp_chk_idx]),
   n_rp_total = n_rp
 )
 # as.array() matters here specifically because n_pp_chk = 1 (and n_rp_chk = 1):
