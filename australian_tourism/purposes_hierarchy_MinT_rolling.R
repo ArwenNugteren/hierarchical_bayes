@@ -402,7 +402,7 @@ generated quantities {
   for (n in 1:n_rp) {
     vector[H] lf; vector[H] sf;
     lf[1] = l_rp[n][T_train + 1];
-    for (h in 1:H) sf[h] = s_rp[n][T_train + h - m];
+    for (h in 1:H) sf[h] = s_rp[n][T_train + h];
     for (h in 1:(H-1)) {
       Y_fc_rp[h, n] = normal_rng(lf[h] + sf[h], sigma_rp[n]);
       lf[h+1] = alpha_rp[n] * (Y_fc_rp[h, n] - sf[h]) + (1 - alpha_rp[n]) * lf[h];
@@ -412,7 +412,7 @@ generated quantities {
   for (n in 1:n_zp) {
     vector[H] lf; vector[H] sf;
     lf[1] = l_zp[n][T_train + 1];
-    for (h in 1:H) sf[h] = s_zp[n][T_train + h - m];
+    for (h in 1:H) sf[h] = s_zp[n][T_train + h];
     for (h in 1:(H-1)) {
       Y_fc_zp[h, n] = normal_rng(lf[h] + sf[h], sigma_zp[n]);
       lf[h+1] = alpha_zp[n] * (Y_fc_zp[h, n] - sf[h]) + (1 - alpha_zp[n]) * lf[h];
@@ -422,7 +422,7 @@ generated quantities {
   for (n in 1:n_sp) {
     vector[H] lf; vector[H] sf;
     lf[1] = l_sp[n][T_train + 1];
-    for (h in 1:H) sf[h] = s_sp[n][T_train + h - m];
+    for (h in 1:H) sf[h] = s_sp[n][T_train + h];
     for (h in 1:(H-1)) {
       Y_fc_sp[h, n] = normal_rng(lf[h] + sf[h], sigma_sp[n]);
       lf[h+1] = alpha_sp[n] * (Y_fc_sp[h, n] - sf[h]) + (1 - alpha_sp[n]) * lf[h];
@@ -432,7 +432,7 @@ generated quantities {
   for (n in 1:n_pp) {
     vector[H] lf; vector[H] sf;
     lf[1] = l_pp[n][T_train + 1];
-    for (h in 1:H) sf[h] = s_pp[n][T_train + h - m];
+    for (h in 1:H) sf[h] = s_pp[n][T_train + h];
     for (h in 1:(H-1)) {
       Y_fc_pp[h, n] = normal_rng(lf[h] + sf[h], sigma_pp[n]);
       lf[h+1] = alpha_pp[n] * (Y_fc_pp[h, n] - sf[h]) + (1 - alpha_pp[n]) * lf[h];
@@ -442,7 +442,7 @@ generated quantities {
   {
     vector[H] lf; vector[H] sf;
     lf[1] = l_t[T_train + 1];
-    for (h in 1:H) sf[h] = s_t[T_train + h - m];
+    for (h in 1:H) sf[h] = s_t[T_train + h];
     for (h in 1:(H-1)) {
       Y_fc_total[h] = normal_rng(lf[h] + sf[h], sigma_total);
       lf[h+1] = alpha_total * (Y_fc_total[h] - sf[h]) + (1 - alpha_total) * lf[h];
@@ -465,7 +465,7 @@ stanFit <- sampling(
     n_zp       = n_zp,
     n_sp       = n_sp,
     n_pp       = n_pp,
-    H          = horizon + 1,
+    H          = horizon,
     Y_rp       = Y_rp[train_idx, ],
     Y_zp       = Y_zp[train_idx, ],
     Y_sp       = Y_sp[train_idx, ],
