@@ -63,6 +63,9 @@ The file `accuracy_purposes_rolling.R` runs accuracy metrics for a single trial,
 Corresponding author for queries on this repository is Arwen Nugteren, email: a.nugteren@qut.edu.au
 This repository last edited 2nd October 2026. 
 
+### Licensing
+Released for academic reproducibility. If you need a different license for downstream use, open an issue.
+
 ### References
 Wickramasuriya, S.L., Athanasopoulos, G., Hyndman, R.J., 2019. Optimal forecast reconciliation for hierarchical and grouped time series through trace minimization. Journal of the American Statistical Association 114, 804–819. doi:10.1080/01621459.2018.1448825
 
