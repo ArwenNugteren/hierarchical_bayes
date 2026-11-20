@@ -66,6 +66,7 @@ origins     <- 96:(96 + test_set - 1)
 
 task_id <- as.integer(Sys.getenv("PBS_ARRAY_INDEX"))
 origin  <- origins[task_id]
+# origin <- 96
 
 # ── Training and test windows ──────────────────────────────────────────────────
 
@@ -94,6 +95,7 @@ Y_total <- (Y_raw_total - Y_mean * n_rp) / Y_sd
 # weights and penalties
 # edit sigma_coh to 0.005 * n_rp for softer penalty
 # edit lambda_total to n_rp for top-level weighting
+# lambda_pp to (n_rp/n_pp) for purposes weighting
 lambda_total <- 1
 lambda_pp    <- 1*(n_rp/n_pp)
 lambda_sp    <- 1
@@ -586,11 +588,8 @@ JSD_metric <- function(p_draws, q_draws, n_grid = 1000) {
 }
 
 # ── Single-pass extraction ─────────────────────────────────────────────────────
-
-all_pars <- rstan::extract(stanFit, pars = c(
-  "Y_fc_rp", "Y_fc_zp", "Y_fc_sp", "Y_fc_pp", "Y_fc_total",
-  "fitted_rp", "fitted_zp", "fitted_sp", "fitted_pp", "fitted_total"
-))
+all_pars <- rstan::extract(stanFit, pars = c("Y_fc_rp", "Y_fc_zp", "Y_fc_sp", "Y_fc_pp", "Y_fc_total"))
+n_draws  <- nrow(all_pars$Y_fc_rp)
 
 fc_rp_draws    <- all_pars$Y_fc_rp
 fc_zp_draws    <- all_pars$Y_fc_zp
@@ -618,42 +617,6 @@ for (p in seq_len(n_pp))
   fc_pp_orig[, , p] <- fc_pp_draws[, 1:horizon, p] * Y_sd + Y_mean * rp_per_pp[p]
 
 rm(fc_rp_draws, fc_zp_draws, fc_sp_draws, fc_pp_draws, fc_total_draws)
-
-# ── Build posterior-mean residuals for MinT W matrix ──────────────────────────
-
-pm_fitted_rp    <- apply(all_pars$fitted_rp,    2:3, mean)
-pm_fitted_zp    <- apply(all_pars$fitted_zp,    2:3, mean)
-pm_fitted_sp    <- apply(all_pars$fitted_sp,    2:3, mean)
-pm_fitted_pp    <- apply(all_pars$fitted_pp,    2:3, mean)
-pm_fitted_total <- apply(all_pars$fitted_total, 2,   mean)
-
-rm(all_pars)
-
-fit_rp_orig    <- pm_fitted_rp    * Y_sd + Y_mean
-fit_total_orig <- pm_fitted_total * Y_sd + Y_mean * n_rp
-
-fit_zp_orig <- pm_fitted_zp
-for (z in seq_len(n_zp))
-  fit_zp_orig[, z] <- pm_fitted_zp[, z] * Y_sd + Y_mean * rp_per_zp[z]
-
-fit_sp_orig <- pm_fitted_sp
-for (s in seq_len(n_sp))
-  fit_sp_orig[, s] <- pm_fitted_sp[, s] * Y_sd + Y_mean * rp_per_sp[s]
-
-fit_pp_orig <- pm_fitted_pp
-for (p in seq_len(n_pp))
-  fit_pp_orig[, p] <- pm_fitted_pp[, p] * Y_sd + Y_mean * rp_per_pp[p]
-
-E <- cbind(
-  Y_raw_total[train_idx] - fit_total_orig,
-  Y_raw_pp[train_idx, ]  - fit_pp_orig,
-  Y_raw_sp[train_idx, ]  - fit_sp_orig,
-  Y_raw_zp[train_idx, ]  - fit_zp_orig,
-  Y_raw_rp[train_idx, ]  - fit_rp_orig
-)
-
-rm(pm_fitted_rp, pm_fitted_zp, pm_fitted_sp, pm_fitted_pp, pm_fitted_total,
-   fit_rp_orig, fit_zp_orig, fit_sp_orig, fit_pp_orig, fit_total_orig)
 
 # ── Actuals ────────────────────────────────────────────────────────────────────
 
